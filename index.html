@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>SBI: Solid 3D Woodland (20m)</title>
+  <title>SBI: 3D Woodland & Static Flow Arrows</title>
   <!-- CesiumJS -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.110.0/Cesium.js"></script>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.110.0/Widgets/widgets.css" rel="stylesheet">
@@ -57,7 +57,7 @@
     
     <div class="layer-row">
         <input type="checkbox" id="chkOFP" checked onchange="toggleOFP(this.checked)">
-        <label for="chkOFP">Show Flow Pathways (Simplified)</label>
+        <label for="chkOFP">Show Flow Arrows</label>
     </div>
 
     <div id="loadingIndicator"></div>
@@ -79,7 +79,7 @@
         'Residential Gardens': '#90EE90', 'Non-agricultural land': '#A9A9A9', 'default': '#FFeda0'
     };
 
-    // 2. Initialize Viewer with Anti-Aliasing Enabled
+    // 2. Initialize Viewer
     const viewer = new Cesium.Viewer('cesiumContainer', {
       terrainProvider: undefined, // Flat ellipsoid
       baseLayerPicker: false,
@@ -95,18 +95,17 @@
       }))
     });
 
-    // --- Optimization: Enable Hardware Smoothing (MSAA) ---
     viewer.scene.msaaSamples = 4; 
     viewer.scene.postProcessStages.fxaa.enabled = true; 
 
     // 3. State Management
     let dsRPA = null;
     let dsOutlines = null;
-    let dsOFP = null;
+    let dsOFP = null; // Will use a CustomDataSource for manual entities
     let sbiBbox = null;
 
-    // --- Helper: Resample LineString to vertex every 10m ---
-    function resampleLine(lineFeature, intervalMeters = 10) {
+    // --- Helper: Resample LineString to vertex every X meters ---
+    function resampleLine(lineFeature, intervalMeters = 20) {
         const length = turf.length(lineFeature, {units: 'meters'});
         if (length <= intervalMeters) return lineFeature;
 
@@ -115,6 +114,7 @@
             const pt = turf.along(lineFeature, step, {units: 'meters'});
             newCoords.push(pt.geometry.coordinates);
         }
+        // Always add the very end point
         const endPt = turf.along(lineFeature, length, {units: 'meters'});
         newCoords.push(endPt.geometry.coordinates);
 
@@ -124,13 +124,10 @@
     // --- Helper: Reproject BNG -> WGS84 + Add Height Buffer ---
     function reprojectGeoJSON(geojson) {
         let cloned = JSON.parse(JSON.stringify(geojson));
-        
-        // Transform adds 2m height for SBI Outlines
         const transform = (coords) => {
             const wgs = proj4('EPSG:27700', 'EPSG:4326', coords);
             return [wgs[0], wgs[1], 2]; // 2 meters for outlines
         };
-
         const transformGeometry = (geometry) => {
             if (geometry.type === 'Polygon' || geometry.type === 'MultiLineString') {
                 geometry.coordinates = geometry.coordinates.map(ring => ring.map(transform));
@@ -140,7 +137,6 @@
                 geometry.coordinates = geometry.coordinates.map(transform);
             }
         };
-
         if (cloned.type === 'FeatureCollection') {
             cloned.features.forEach(f => transformGeometry(f.geometry));
         } else if (cloned.type === 'Feature') {
@@ -157,7 +153,6 @@
         
         if(!sbi) return alert("Enter SBI");
         
-        // Cleanup
         if(dsRPA) viewer.dataSources.remove(dsRPA);
         if(dsOutlines) viewer.dataSources.remove(dsOutlines);
         if(dsOFP) viewer.dataSources.remove(dsOFP);
@@ -174,10 +169,9 @@
             const data = await response.json();
             if (!data.features || data.features.length === 0) throw new Error("No SBI Data found");
 
-            // Reproject to WGS84 with Z=2m
             const wgs84Data = reprojectGeoJSON(data);
             
-            // 1. Load Fills (Unclamped for 3D extrusion)
+            // 1. Load Fills
             dsRPA = await Cesium.GeoJsonDataSource.load(wgs84Data, { clampToGround: false });
             const entities = dsRPA.entities.values;
             const foundCategories = new Set();
@@ -190,21 +184,19 @@
                 
                 if(entity.polygon) {
                     entity.polygon.outline = false; 
-                    entity.polygon.height = 0; // Base at 0
-                    
-                    // Logic for Woodland Extrusion
+                    entity.polygon.height = 0;
                     if (desc === 'Woodland' || desc === 'Natural Woodland') {
-                        entity.polygon.extrudedHeight = 20; // 20m Height
-                        entity.polygon.material = color;    // Solid Opaque
+                        entity.polygon.extrudedHeight = 20; 
+                        entity.polygon.material = color;    
                     } else {
-                        entity.polygon.extrudedHeight = undefined; // Flat
-                        entity.polygon.material = color.withAlpha(0.6); // Transparent
+                        entity.polygon.extrudedHeight = undefined; 
+                        entity.polygon.material = color.withAlpha(0.6); 
                     }
                 }
             }
             viewer.dataSources.add(dsRPA);
 
-            // 2. Load Outlines (Floating at 2m)
+            // 2. Load Outlines
             const outlinesGeoJSON = { type: "FeatureCollection", features: [] };
             wgs84Data.features.forEach(f => {
                 if (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon') {
@@ -224,7 +216,6 @@
                 }
             }
             viewer.dataSources.add(dsOutlines);
-
             viewer.zoomTo(dsRPA);
 
             // B. Build Legend
@@ -233,9 +224,9 @@
                 const color = landCoverColors[c] || landCoverColors['default'];
                 legend.innerHTML += `<div class="legend-item"><i style="background:${color}"></i><span>${c}</span></div>`;
             });
-            legend.innerHTML += `<hr><div style="font-weight:bold; font-size:11px; margin-bottom:5px;">Flow Pathways (10m resampled):</div>
-            <div class="legend-item"><i style="background:red; height:3px; margin-top:7px"></i><span>High Flow</span></div>
-            <div class="legend-item"><i style="background:blue; height:1px; margin-top:9px"></i><span>Low Flow</span></div>`;
+            legend.innerHTML += `<hr><div style="font-weight:bold; font-size:11px; margin-bottom:5px;">Flow Pathways:</div>
+            <div class="legend-item"><i style="background:red; width:10px; height:10px; clip-path: polygon(0 0, 100% 50%, 0 100%); margin-right:5px;"></i><span>High Flow (Arrows)</span></div>
+            <div class="legend-item"><i style="background:blue; width:10px; height:10px; clip-path: polygon(0 0, 100% 50%, 0 100%); margin-right:5px;"></i><span>Low Flow (Arrows)</span></div>`;
             legend.style.display = 'block';
 
             // C. Trigger OFP
@@ -258,7 +249,7 @@
         }
     }
 
-    // --- Flow Pathways Logic ---
+    // --- Flow Pathways Logic (Segmented Arrows) ---
     function loadFilteredOFP(bboxArray) {
         const loader = document.getElementById('loadingIndicator');
         loader.innerText = "Fetching Flow Pathways...";
@@ -274,47 +265,59 @@
                 return;
             }
             
-            loader.innerText = `Simplifying ${data.features.length} lines...`;
+            loader.innerText = `Generating Arrows for ${data.features.length} paths...`;
             await new Promise(r => setTimeout(r, 20));
 
-            const processedFeatures = data.features.map(f => {
-                let geom = f;
-                
-                // 1. Resample logic
-                if(f.geometry.type === 'LineString') {
-                    geom = resampleLine(f, 10);
-                }
-                
-                // 2. Float Logic: Add 4m height to OFP
-                geom.geometry.coordinates = geom.geometry.coordinates.map(c => [c[0], c[1], 4]); // 4 meters
-                
-                return geom;
-            });
+            // Use CustomDataSource for manual entity addition
+            dsOFP = new Cesium.CustomDataSource('FlowArrows');
+            
+            const features = data.features;
+            let arrowCount = 0;
 
-            const fc = turf.featureCollection(processedFeatures);
-            
-            dsOFP = await Cesium.GeoJsonDataSource.load(fc, { clampToGround: false });
-            
-            const entities = dsOFP.entities.values;
-            for(let i=0; i<entities.length; i++) {
-                const ent = entities[i];
-                const flowVal = ent.properties.MaxFlowAcc ? ent.properties.MaxFlowAcc.getValue() : 0;
+            for(let i=0; i<features.length; i++) {
+                const f = features[i];
+                const flowVal = f.properties.MaxFlowAcc || 0;
                 
+                // Determine style
                 let color, width;
                 if (flowVal >= 50000) { 
                     color = Cesium.Color.RED; 
-                    width = 2.0; 
+                    width = 8.0; 
                 } else { 
                     color = Cesium.Color.BLUE; 
-                    width = 1.0; 
-                } 
+                    width = 6.0; 
+                }
+                
+                // Resample to get segments every ~40m for arrows
+                let geom = f;
+                if(f.geometry.type === 'LineString') {
+                    // Resample to 40m segments to space out arrows nicely
+                    geom = resampleLine(f, 40); 
+                }
 
-                if(ent.polyline) {
-                    ent.polyline.material = color;
-                    ent.polyline.width = width;
-                    ent.polyline.clampToGround = false; 
+                // Iterate segments and create Arrow Entities
+                const coords = geom.geometry.coordinates;
+                for(let j=0; j<coords.length - 1; j++) {
+                    const start = coords[j];
+                    const end = coords[j+1];
+                    
+                    dsOFP.entities.add({
+                        polyline: {
+                            positions: Cesium.Cartesian3.fromDegreesArrayHeights([
+                                start[0], start[1], 4,  // Height 4m
+                                end[0], end[1], 4       // Height 4m
+                            ]),
+                            width: width,
+                            // This creates the arrow head at the end of the segment
+                            material: new Cesium.PolylineArrowMaterialProperty(color),
+                            clampToGround: false
+                        }
+                    });
+                    arrowCount++;
                 }
             }
+            
+            console.log(`Created ${arrowCount} arrow segments.`);
             
             if(document.getElementById('chkOFP').checked) {
                 viewer.dataSources.add(dsOFP);
@@ -323,7 +326,7 @@
         })
         .catch(e => {
             console.error(e);
-            loader.innerText = "OFP Error";
+            loader.innerText = "OFP Error: " + e.message;
         });
     }
 
