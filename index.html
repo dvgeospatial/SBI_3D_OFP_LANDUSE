@@ -103,6 +103,7 @@
     let dsOutlines = null;
     let dsOFP = null; // Will use a CustomDataSource for manual entities
     let sbiBbox = null;
+    let currentSbiData = null; // Stores the GeoJSON of the current SBI
 
     // --- Helper: Resample LineString to vertex every X meters ---
     function resampleLine(lineFeature, intervalMeters = 20) {
@@ -170,6 +171,7 @@
             if (!data.features || data.features.length === 0) throw new Error("No SBI Data found");
 
             const wgs84Data = reprojectGeoJSON(data);
+            currentSbiData = wgs84Data; // Store for Intersection checks
             
             // 1. Load Fills
             dsRPA = await Cesium.GeoJsonDataSource.load(wgs84Data, { clampToGround: false });
@@ -238,7 +240,8 @@
             }
 
             if(document.getElementById('chkOFP').checked) {
-                loadFilteredOFP(sbiBbox);
+                // Pass the geometry for filtering
+                loadFilteredOFP(sbiBbox, currentSbiData);
             } else {
                 loader.innerText = "Ready.";
             }
@@ -250,10 +253,11 @@
     }
 
     // --- Flow Pathways Logic (Segmented Arrows) ---
-    function loadFilteredOFP(bboxArray) {
+    function loadFilteredOFP(bboxArray, sbiGeoJSON) {
         const loader = document.getElementById('loadingIndicator');
         loader.innerText = "Fetching Flow Pathways...";
         
+        // 1. Fetch rough BBOX
         const bboxStr = bboxArray.join(',');
         const ofpUrl = "https://services1.arcgis.com/JZM7qJpmv7vJ0Hzx/arcgis/rest/services/OverlandFlowPathwaysForPublicALERTEngland_20240318/FeatureServer/0";
         
@@ -264,14 +268,32 @@
                 loader.innerText = "No Flow Pathways found.";
                 return;
             }
+
+            // 2. Client-side Filter: Keep only OFP that intersects with SBI polygons
+            loader.innerText = `Filtering ${data.features.length} paths by intersection...`;
             
-            loader.innerText = `Generating Arrows for ${data.features.length} paths...`;
+            // Allow UI to update before heavy processing
+            await new Promise(r => setTimeout(r, 20));
+
+            const features = data.features.filter(ofpFeature => {
+                // Check if this OFP line intersects ANY of the SBI polygons
+                return sbiGeoJSON.features.some(sbiFeature => {
+                    // turf.booleanIntersects checks for overlap or crossing
+                    return turf.booleanIntersects(ofpFeature, sbiFeature);
+                });
+            });
+
+            if(features.length === 0) {
+                loader.innerText = "No Flow Pathways intersect this SBI.";
+                return;
+            }
+
+            loader.innerText = `Generating Arrows for ${features.length} intersecting paths...`;
             await new Promise(r => setTimeout(r, 20));
 
             // Use CustomDataSource for manual entity addition
             dsOFP = new Cesium.CustomDataSource('FlowArrows');
             
-            const features = data.features;
             let arrowCount = 0;
 
             for(let i=0; i<features.length; i++) {
@@ -334,8 +356,8 @@
         if(checked) {
             if(dsOFP) {
                 if(!viewer.dataSources.contains(dsOFP)) viewer.dataSources.add(dsOFP);
-            } else if(sbiBbox) {
-                loadFilteredOFP(sbiBbox);
+            } else if(sbiBbox && currentSbiData) {
+                loadFilteredOFP(sbiBbox, currentSbiData);
             }
         } else {
             if(dsOFP) viewer.dataSources.remove(dsOFP);
