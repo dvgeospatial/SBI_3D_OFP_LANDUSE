@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>SBI: 3D Woodland & Static Flow Arrows</title>
+  <title>SBI: 3D Woodland Visualization</title>
   <!-- CesiumJS -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.110.0/Cesium.js"></script>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.110.0/Widgets/widgets.css" rel="stylesheet">
@@ -10,22 +10,24 @@
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.0/dist/proj4.js"></script>
   <!-- Turf.js for Geometry Processing -->
   <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
-  
+
   <style>
     body, html, #cesiumContainer { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; background: #dcdcdc; font-family: sans-serif; }
-    
+
     #controls {
       position: absolute; top: 10px; left: 10px; z-index: 100;
       background: rgba(255, 255, 255, 0.95); padding: 12px; border-radius: 4px;
       box-shadow: 0 1px 5px rgba(0,0,0,0.2); width: 220px;
     }
-    input[type="text"] { padding: 5px; width: 100%; box-sizing: border-box; margin-bottom: 8px; border: 1px solid #ccc; }
+
     button {
       padding: 8px; background-color: #333; color: white; border: none; 
       border-radius: 3px; cursor: pointer; width: 100%; font-weight: bold; margin-bottom: 8px;
     }
     button:hover { background-color: #555; }
-    
+
+    input[type="file"] { display: none; }
+
     .layer-row { display: flex; align-items: center; font-size: 13px; cursor: pointer; margin-bottom: 5px; color: #333; }
     .layer-row input { margin-right: 8px; cursor: pointer; }
 
@@ -46,19 +48,28 @@
       opacity: 0.8; border: 1px solid #999; flex-shrink: 0;
     }
     h4 { margin: 0 0 10px 0; font-size: 14px; border-bottom: 1px solid #ccc; padding-bottom: 5px; color: #333; }
+
+    .separator { border-top: 1px solid #ddd; margin: 10px 0; }
   </style>
 </head>
 <body>
 
   <div id="controls">
-    <label style="font-size:12px; font-weight:bold; color:#333;">Enter SBI Number:</label>
-    <input type="text" id="sbiInput" value="106592409" placeholder="e.g. 106592409">
-    <button onclick="runMapUpdate()">Load SBI Data</button>
-    
+    <label style="font-size:12px; font-weight:bold; color:#333;">Data Loading:</label>
+    <button onclick="loadDatasets()" style="background-color: #228B22;">Load All Data</button>
+
     <div class="layer-row">
-        <input type="checkbox" id="chkOFP" checked onchange="toggleOFP(this.checked)">
-        <label for="chkOFP">Show Flow Arrows</label>
+        <input type="checkbox" id="chkLegend" checked onchange="toggleLegend(this.checked)">
+        <label for="chkLegend">Show Legend</label>
     </div>
+
+    <div class="separator"></div>
+    <label style="font-size:12px; font-weight:bold; color:#333;">Manual Upload:</label>
+    <input type="file" id="sbiFileInput" accept=".geojson, .json" onchange="handleSbiFileUpload(event)">
+    <button onclick="document.getElementById('sbiFileInput').click()" style="background-color: #4682B4;">Upload SBI GeoJSON</button>
+
+    <input type="file" id="fileInput" accept=".geojson, .json" onchange="handleFileUpload(event)">
+    <button onclick="document.getElementById('fileInput').click()" style="margin-top:5px; background-color: #2c7bb6;">Upload Custom GeoJSON</button>
 
     <div id="loadingIndicator"></div>
   </div>
@@ -67,7 +78,11 @@
   <div id="cesiumContainer"></div>
 
   <script>
-    // 1. Setup Proj4 (British National Grid to WGS84)
+    // URLs for datasets
+    const LANDCOVERS_URL = 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FMASSINGHAM_FARM_PARTNERSHIP%2Fsbi_landcovers_that_intersect_route_4326.geojson?alt=media&token=53725055-df03-4de6-ad4c-2568acca11c5';
+    const VEG_URL = 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FMASSINGHAM_FARM_PARTNERSHIP%2Fveg_on_parcels_that_intersect_route_4326.geojson?alt=media&token=f47ace15-22b0-4c95-860d-6563a2781913';
+
+    // Setup Proj4 (BNG definition)
     proj4.defs("EPSG:27700", "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs");
 
     // Colors
@@ -76,12 +91,13 @@
         'Natural Woodland': '#006400', 'Pond': '#4682B4', 'Rivers and streams type 3': '#1E90FF',
         'Drain/Ditch/Dyke': '#00BFFF', 'Farm Building': '#8B4513', 'Residential dwelling, House': '#CD5C5C',
         'Farmyards': '#D2B48C', 'Track - Natural Surface': '#DEB887', 'Metalled track': '#808080',
-        'Residential Gardens': '#90EE90', 'Non-agricultural land': '#A9A9A9', 'default': '#FFeda0'
+        'Residential Gardens': '#90EE90', 'Non-agricultural land': '#A9A9A9', 'Scrub - Ungrazeable': '#8FBC8F',
+        'default': '#FFeda0'
     };
 
-    // 2. Initialize Viewer
+    // Initialize Viewer
     const viewer = new Cesium.Viewer('cesiumContainer', {
-      terrainProvider: undefined, // Flat ellipsoid
+      terrainProvider: undefined,
       baseLayerPicker: false,
       timeline: false,
       animation: false,
@@ -98,310 +114,268 @@
     viewer.scene.msaaSamples = 4; 
     viewer.scene.postProcessStages.fxaa.enabled = true; 
 
-    // 3. State Management
+    // State Management
     let dsRPA = null;
     let dsOutlines = null;
-    let dsOFP = null; // Will use a CustomDataSource for manual entities
-    let currentSbiData = null; // Stores the GeoJSON of the current SBI
+    let dsCustom = null; 
+    let currentSbiData = null; 
 
-    // --- Helper: Resample LineString to vertex every X meters ---
-    function resampleLine(lineFeature, intervalMeters = 20) {
-        const length = turf.length(lineFeature, {units: 'meters'});
-        if (length <= intervalMeters) return lineFeature;
-
-        const newCoords = [];
-        for (let step = 0; step <= length; step += intervalMeters) {
-            const pt = turf.along(lineFeature, step, {units: 'meters'});
-            newCoords.push(pt.geometry.coordinates);
-        }
-        // Always add the very end point
-        const endPt = turf.along(lineFeature, length, {units: 'meters'});
-        newCoords.push(endPt.geometry.coordinates);
-
-        return turf.lineString(newCoords, lineFeature.properties);
-    }
-
-    // --- Helper: Reproject BNG -> WGS84 + Add Height Buffer ---
-    function reprojectGeoJSON(geojson) {
+    // --- Helper: Robust GeoJSON Processor (Auto-detects BNG/WGS84) ---
+    function processGeoJSON(geojson) {
         let cloned = JSON.parse(JSON.stringify(geojson));
-        const transform = (coords) => {
-            const wgs = proj4('EPSG:27700', 'EPSG:4326', coords);
-            return [wgs[0], wgs[1], 2]; // 2 meters for outlines
-        };
-        const transformGeometry = (geometry) => {
-            if (geometry.type === 'Polygon' || geometry.type === 'MultiLineString') {
-                geometry.coordinates = geometry.coordinates.map(ring => ring.map(transform));
-            } else if (geometry.type === 'MultiPolygon') {
-                geometry.coordinates = geometry.coordinates.map(poly => poly.map(ring => ring.map(transform)));
-            } else if (geometry.type === 'LineString') {
-                geometry.coordinates = geometry.coordinates.map(transform);
+        
+        // Check first coordinate to detect projection
+        let isBNG = false;
+        try {
+            const firstFeat = cloned.features[0];
+            const firstCoord = getFirstCoordinate(firstFeat.geometry);
+            if (firstCoord && firstCoord[0] > 180) {
+                isBNG = true;
+                console.log("Detected BNG Coordinates. Reprojecting...");
+            } else {
+                console.log("Detected WGS84 Coordinates. Processing...");
+            }
+        } catch(e) { console.warn("Could not auto-detect projection", e); }
+
+        const transformFn = (coords) => {
+            if (isBNG) {
+                const wgs = proj4('EPSG:27700', 'EPSG:4326', coords);
+                return [wgs[0], wgs[1], 2];
+            } else {
+                return [coords[0], coords[1], 2];
             }
         };
+
+        const transformGeometry = (geometry) => {
+            if (geometry.type === 'Polygon' || geometry.type === 'MultiLineString') {
+                geometry.coordinates = geometry.coordinates.map(ring => ring.map(transformFn));
+            } else if (geometry.type === 'MultiPolygon') {
+                geometry.coordinates = geometry.coordinates.map(poly => poly.map(ring => ring.map(transformFn)));
+            } else if (geometry.type === 'LineString') {
+                geometry.coordinates = geometry.coordinates.map(transformFn);
+            }
+        };
+
         if (cloned.type === 'FeatureCollection') {
             cloned.features.forEach(f => transformGeometry(f.geometry));
         } else if (cloned.type === 'Feature') {
             transformGeometry(cloned.geometry);
         }
+        
         return turf.rewind(cloned, {reverse: false, mutate: true});
     }
 
-    // --- Main Update Function ---
-    async function runMapUpdate() {
-        const sbi = document.getElementById('sbiInput').value.trim();
-        const loader = document.getElementById('loadingIndicator');
+    function getFirstCoordinate(geometry) {
+        if (geometry.type === 'Point') return geometry.coordinates;
+        if (geometry.type === 'LineString' || geometry.type === 'MultiPoint') return geometry.coordinates[0];
+        if (geometry.type === 'Polygon' || geometry.type === 'MultiLineString') return geometry.coordinates[0][0];
+        if (geometry.type === 'MultiPolygon') return geometry.coordinates[0][0][0];
+        return null;
+    }
+
+    // --- Load Both Datasets Automatically ---
+    async function loadDatasets() {
+      const loader = document.getElementById('loadingIndicator');
+      loader.style.display = 'block';
+      loader.innerText = "Loading landcovers...";
+
+      try {
+        // 1. Load SBI Landcovers
+        const landcoversResponse = await fetch(LANDCOVERS_URL);
+        const landcoversData = await landcoversResponse.json();
+        await loadSbiData(landcoversData);
+
+        // 2. Load Vegetation Custom Layer
+        loader.innerText = "Loading vegetation...";
+        const vegResponse = await fetch(VEG_URL);
+        const vegData = await vegResponse.json();
+        await loadCustomData(vegData);
+
+        loader.innerText = "All data loaded successfully!";
+        setTimeout(() => { loader.style.display = 'none'; }, 2000);
+
+      } catch (err) {
+        console.error("Load Error:", err);
+        alert("Error loading data: " + err.message);
+        loader.innerText = "Error loading data.";
+      }
+    }
+
+    // --- Load SBI Data ---
+    async function loadSbiData(data) {
+      const loader = document.getElementById('loadingIndicator');
+      const legend = document.getElementById('legendPanel');
+
+      if(dsRPA) viewer.dataSources.remove(dsRPA);
+      if(dsOutlines) viewer.dataSources.remove(dsOutlines);
+      legend.style.display = 'none';
+
+      if (!data.features || data.features.length === 0) {
+        throw new Error("No features found in landcovers GeoJSON");
+      }
+
+      // Process (Auto-detect projection + Add height)
+      const processedData = processGeoJSON(data);
+      currentSbiData = processedData;
+
+      // 1. Load Fills
+      dsRPA = await Cesium.GeoJsonDataSource.load(processedData, { clampToGround: false });
+      const entities = dsRPA.entities.values;
+      const foundCategories = new Set();
+
+      for (let i = 0; i < entities.length; i++) {
+          const entity = entities[i];
+          const desc = entity.properties.DESCRIPTION ? entity.properties.DESCRIPTION.getValue() : 'default';
+          foundCategories.add(desc);
+          const colorCss = landCoverColors[desc] || landCoverColors['default'];
+          const color = Cesium.Color.fromCssColorString(colorCss);
+
+          if(entity.polygon) {
+              entity.polygon.outline = false;
+              entity.polygon.height = 2;
+              entity.polygon.extrudedHeight = undefined;
+
+              if (desc === 'Woodland' || desc === 'Natural Woodland') {
+                  entity.polygon.material = color;    
+              } else {
+                  entity.polygon.material = color.withAlpha(0.6); 
+              }
+          }
+      }
+      viewer.dataSources.add(dsRPA);
+
+      // 2. Load Outlines
+      const outlinesGeoJSON = { type: "FeatureCollection", features: [] };
+      processedData.features.forEach(f => {
+          if (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon') {
+              const lines = turf.polygonToLine(f);
+              if (lines.type === 'FeatureCollection') outlinesGeoJSON.features.push(...lines.features);
+              else outlinesGeoJSON.features.push(lines);
+          }
+      });
+
+      dsOutlines = await Cesium.GeoJsonDataSource.load(outlinesGeoJSON, { clampToGround: false });
+      const outlineEntities = dsOutlines.entities.values;
+      for(let i=0; i<outlineEntities.length; i++) {
+          const ent = outlineEntities[i];
+          if(ent.polyline) {
+              ent.polyline.material = Cesium.Color.BLACK;
+              ent.polyline.width = 1.0;
+          }
+      }
+      viewer.dataSources.add(dsOutlines);
+      viewer.zoomTo(dsRPA);
+
+      // 3. Build Legend
+      legend.innerHTML = '<h4>Land Cover</h4>';
+      Array.from(foundCategories).sort().forEach(c => {
+          const color = landCoverColors[c] || landCoverColors['default'];
+          legend.innerHTML += `<div class="legend-item"><i style="background:${color}"></i><span>${c}</span></div>`;
+      });
+
+      if(document.getElementById('chkLegend').checked) {
+          legend.style.display = 'block';
+      }
+    }
+
+    // --- Load Custom Vegetation Data ---
+    async function loadCustomData(geojsonObject) {
+      if(dsCustom) {
+        viewer.dataSources.remove(dsCustom);
+        dsCustom = null;
+      }
+
+      const dataSource = await Cesium.GeoJsonDataSource.load(geojsonObject, {
+        clampToGround: false 
+      });
+
+      const entities = dataSource.entities.values;
+      const woodlandColor = Cesium.Color.fromCssColorString(landCoverColors['Woodland']);
+
+      for (let i = 0; i < entities.length; i++) {
+        const entity = entities[i];
+
+        if (entity.properties && entity.properties.height) {
+          const heightValue = entity.properties.height.getValue();
+
+          if (entity.polygon) {
+            entity.polygon.height = 2;
+            entity.polygon.extrudedHeight = heightValue + 2; 
+            entity.polygon.material = woodlandColor;
+            entity.polygon.outline = false; 
+          }
+        }
+      }
+
+      dsCustom = dataSource;
+      viewer.dataSources.add(dsCustom);
+      viewer.zoomTo(dsCustom);
+    }
+
+    // --- Handle Manual SBI File Upload ---
+    async function handleSbiFileUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const loader = document.getElementById('loadingIndicator');
+      loader.style.display = 'block';
+      loader.innerText = "Loading SBI GeoJSON...";
+
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const data = JSON.parse(e.target.result);
+          await loadSbiData(data);
+          loader.innerText = "SBI Loaded.";
+          document.getElementById('sbiFileInput').value = '';
+        } catch (err) {
+          console.error("SBI Load Error:", err);
+          alert("Error loading SBI GeoJSON: " + err.message);
+          loader.innerText = "Error loading file.";
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // --- Handle Manual Custom File Upload ---
+    async function handleFileUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const loader = document.getElementById('loadingIndicator');
+      loader.style.display = 'block';
+      loader.innerText = "Parsing Custom GeoJSON...";
+
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const geojsonObject = JSON.parse(e.target.result);
+          await loadCustomData(geojsonObject);
+          loader.innerText = "Custom Layer Loaded.";
+          document.getElementById('fileInput').value = '';
+        } catch (err) {
+          console.error("GeoJSON Error:", err);
+          alert("Error: Check console. Ensure GeoJSON is valid.");
+          loader.innerText = "Error loading file.";
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // --- Toggle Legend ---
+    function toggleLegend(checked) {
         const legend = document.getElementById('legendPanel');
-        
-        if(!sbi) return alert("Enter SBI");
-        
-        if(dsRPA) viewer.dataSources.remove(dsRPA);
-        if(dsOutlines) viewer.dataSources.remove(dsOutlines);
-        if(dsOFP) viewer.dataSources.remove(dsOFP);
-        dsOFP = null; // Reset reference
-        
-        legend.style.display = 'none';
-        loader.style.display = 'block';
-        loader.innerText = "Fetching RPA Data...";
-
-        try {
-            // A. Load RPA Data
-            const url = `https://environment.data.gov.uk/data-services/RPA/LandCovers/wfs?version=2.0.0&request=GetFeature&typeNames=RPA:LandCovers&cql_filter=SBI=${sbi}&srsname=EPSG:27700&outputFormat=application/json`;
-            const response = await fetch(url);
-            if(!response.ok) throw new Error("RPA Service Error");
-            const data = await response.json();
-            if (!data.features || data.features.length === 0) throw new Error("No SBI Data found");
-
-            const wgs84Data = reprojectGeoJSON(data);
-            currentSbiData = wgs84Data; // Store for Intersection checks
-            
-            // 1. Load Fills
-            dsRPA = await Cesium.GeoJsonDataSource.load(wgs84Data, { clampToGround: false });
-            const entities = dsRPA.entities.values;
-            const foundCategories = new Set();
-            for (let i = 0; i < entities.length; i++) {
-                const entity = entities[i];
-                const desc = entity.properties.DESCRIPTION ? entity.properties.DESCRIPTION.getValue() : 'default';
-                foundCategories.add(desc);
-                const colorCss = landCoverColors[desc] || landCoverColors['default'];
-                const color = Cesium.Color.fromCssColorString(colorCss);
-                
-                if(entity.polygon) {
-                    entity.polygon.outline = false; 
-                    entity.polygon.height = 0;
-                    if (desc === 'Woodland' || desc === 'Natural Woodland') {
-                        entity.polygon.extrudedHeight = 20; 
-                        entity.polygon.material = color;    
-                    } else {
-                        entity.polygon.extrudedHeight = undefined; 
-                        entity.polygon.material = color.withAlpha(0.6); 
-                    }
-                }
-            }
-            viewer.dataSources.add(dsRPA);
-
-            // 2. Load Outlines
-            const outlinesGeoJSON = { type: "FeatureCollection", features: [] };
-            wgs84Data.features.forEach(f => {
-                if (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon') {
-                    const lines = turf.polygonToLine(f);
-                    if (lines.type === 'FeatureCollection') outlinesGeoJSON.features.push(...lines.features);
-                    else outlinesGeoJSON.features.push(lines);
-                }
-            });
-
-            dsOutlines = await Cesium.GeoJsonDataSource.load(outlinesGeoJSON, { clampToGround: false });
-            const outlineEntities = dsOutlines.entities.values;
-            for(let i=0; i<outlineEntities.length; i++) {
-                const ent = outlineEntities[i];
-                if(ent.polyline) {
-                    ent.polyline.material = Cesium.Color.BLACK;
-                    ent.polyline.width = 1.0; 
-                }
-            }
-            viewer.dataSources.add(dsOutlines);
-            viewer.zoomTo(dsRPA);
-
-            // B. Build Legend
-            legend.innerHTML = '<h4>Land Cover</h4>';
-            Array.from(foundCategories).sort().forEach(c => {
-                const color = landCoverColors[c] || landCoverColors['default'];
-                legend.innerHTML += `<div class="legend-item"><i style="background:${color}"></i><span>${c}</span></div>`;
-            });
-            legend.innerHTML += `<hr><div style="font-weight:bold; font-size:11px; margin-bottom:5px;">Flow Pathways:</div>
-            <div class="legend-item"><i style="background:red; width:10px; height:10px; clip-path: polygon(0 0, 100% 50%, 0 100%); margin-right:5px;"></i><span>High Flow (Arrows)</span></div>
-            <div class="legend-item"><i style="background:blue; width:10px; height:10px; clip-path: polygon(0 0, 100% 50%, 0 100%); margin-right:5px;"></i><span>Low Flow (Arrows)</span></div>`;
+        if(checked && currentSbiData) {
             legend.style.display = 'block';
-
-            // C. Trigger OFP
-            if(document.getElementById('chkOFP').checked) {
-                // Pass the geometry for filtering using the Clustered approach
-                loadClusteredOFP(currentSbiData);
-            } else {
-                loader.innerText = "Ready.";
-            }
-
-        } catch (e) {
-            console.error(e);
-            loader.innerText = "Error: " + e.message;
-        }
-    }
-
-    // --- OPTIMIZED Flow Pathways Logic (Density-Based Clustering) ---
-    async function loadClusteredOFP(sbiGeoJSON) {
-        const loader = document.getElementById('loadingIndicator');
-        loader.innerText = "Analyzing Clusters...";
-
-        try {
-            // 1. Convert polygons to centroids for clustering
-            const centroids = turf.featureCollection(
-                sbiGeoJSON.features.map(f => turf.centroid(f))
-            );
-
-            // 2. DBSCAN Clustering (3km threshold)
-            const maxDistKm = 0.5; 
-            const clustered = turf.clustersDbscan(centroids, maxDistKm, { units: 'kilometers', minPoints: 1 });
-
-            // 3. Group Original Polygons by Cluster ID
-            const clusters = {};
-            clustered.features.forEach((centroid, index) => {
-                const clusterId = centroid.properties.cluster !== undefined ? centroid.properties.cluster : -1;
-                if (!clusters[clusterId]) clusters[clusterId] = [];
-                clusters[clusterId].push(sbiGeoJSON.features[index]);
-            });
-
-            const clusterIds = Object.keys(clusters);
-            loader.innerText = `Detected ${clusterIds.length} parcel clusters. Fetching OFP...`;
-
-            // 4. Fetch data for EACH cluster independently
-            const ofpUrl = "https://services1.arcgis.com/JZM7qJpmv7vJ0Hzx/arcgis/rest/services/OverlandFlowPathwaysForPublicALERTEngland_20240318/FeatureServer/0";
-            
-            const promises = clusterIds.map(id => {
-                const clusterFeatures = turf.featureCollection(clusters[id]);
-                const bbox = turf.bbox(clusterFeatures); // [minX, minY, maxX, maxY]
-                
-                // Construct standard Esri Envelope Query
-                const bboxStr = bbox.join(',');
-                const queryUrl = `${ofpUrl}/query?f=geojson&geometry=${bboxStr}&geometryType=esriGeometryEnvelope&spatialRel=esriSpatialRelIntersects&outFields=*&outSR=4326`;
-
-                return fetch(queryUrl)
-                    .then(r => r.json())
-                    .then(data => data.features || [])
-                    .catch(err => {
-                        console.warn(`Cluster ${id} failed`, err);
-                        return [];
-                    });
-            });
-
-            // 5. Wait for all fetches
-            const results = await Promise.all(promises);
-
-            // 6. Deduplicate Features
-            let allFeatures = [];
-            let seenIds = new Set();
-
-            results.forEach(features => {
-                features.forEach(f => {
-                    const fid = f.properties.OBJECTID || f.id; // Ensure we have a unique ID
-                    if (!seenIds.has(fid)) {
-                        seenIds.add(fid);
-                        allFeatures.push(f);
-                    }
-                });
-            });
-
-            if (allFeatures.length === 0) {
-                loader.innerText = "No Flow Pathways found.";
-                return;
-            }
-
-            // 7. Client-side Filter: Intersection Check
-            // (Even with tight bboxes, we still want to clip strictly to parcels or just check intersection)
-            loader.innerText = `Filtering ${allFeatures.length} paths by intersection...`;
-            await new Promise(r => setTimeout(r, 20));
-
-            const finalFeatures = allFeatures.filter(ofpFeature => {
-                return sbiGeoJSON.features.some(sbiFeature => {
-                    return turf.booleanIntersects(ofpFeature, sbiFeature);
-                });
-            });
-
-            if(finalFeatures.length === 0) {
-                loader.innerText = "No Flow Pathways intersect this SBI.";
-                return;
-            }
-
-            loader.innerText = `Generating Arrows for ${finalFeatures.length} paths...`;
-            await new Promise(r => setTimeout(r, 20));
-
-            // 8. Generate 3D Arrows
-            dsOFP = new Cesium.CustomDataSource('FlowArrows');
-            let arrowCount = 0;
-
-            for(let i=0; i<finalFeatures.length; i++) {
-                const f = finalFeatures[i];
-                const flowVal = f.properties.MaxFlowAcc || 0;
-                
-                // Determine style
-                let color, width;
-                if (flowVal >= 50000) { 
-                    color = Cesium.Color.RED; 
-                    width = 8.0; 
-                } else { 
-                    color = Cesium.Color.BLUE; 
-                    width = 6.0; 
-                }
-                
-                // Resample to get segments every ~40m for arrows
-                let geom = f;
-                if(f.geometry.type === 'LineString') {
-                    geom = resampleLine(f, 40); 
-                }
-
-                const coords = geom.geometry.coordinates;
-                for(let j=0; j<coords.length - 1; j++) {
-                    const start = coords[j];
-                    const end = coords[j+1];
-                    
-                    dsOFP.entities.add({
-                        polyline: {
-                            positions: Cesium.Cartesian3.fromDegreesArrayHeights([
-                                start[0], start[1], 4,  // Height 4m
-                                end[0], end[1], 4       // Height 4m
-                            ]),
-                            width: width,
-                            material: new Cesium.PolylineArrowMaterialProperty(color),
-                            clampToGround: false
-                        }
-                    });
-                    arrowCount++;
-                }
-            }
-            
-            console.log(`Created ${arrowCount} arrow segments.`);
-            
-            if(document.getElementById('chkOFP').checked) {
-                viewer.dataSources.add(dsOFP);
-            }
-            loader.innerText = "Ready.";
-
-        } catch (e) {
-            console.error(e);
-            loader.innerText = "OFP Error: " + e.message;
-        }
-    }
-
-    function toggleOFP(checked) {
-        if(checked) {
-            if(dsOFP) {
-                if(!viewer.dataSources.contains(dsOFP)) viewer.dataSources.add(dsOFP);
-            } else if(currentSbiData) {
-                loadClusteredOFP(currentSbiData);
-            }
         } else {
-            if(dsOFP) viewer.dataSources.remove(dsOFP);
+            legend.style.display = 'none';
         }
     }
 
-    runMapUpdate();
+    // Auto-load data on page load
+    window.addEventListener('load', () => {
+      loadDatasets();
+    });
   </script>
 </body>
 </html>
