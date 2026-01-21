@@ -64,13 +64,18 @@
     .layer-row { display: flex; align-items: center; font-size: 13px; cursor: pointer; margin-bottom: 5px; color: #333; flex-wrap: wrap; }
     .layer-row input[type="checkbox"] { margin-right: 8px; cursor: pointer; }
     
-    /* Time Machine Styles */
-    .tm-container { 
-        margin: 10px 0; padding: 8px; background: #f0f0f0; border-radius: 4px; border: 1px solid #ddd;
+    /* New Time Machine Styles */
+    .time-machine-row {
+        background-color: #f0f8ff;
+        border: 1px solid #4682b4;
+        padding: 8px;
+        border-radius: 4px;
+        margin-bottom: 8px;
     }
-    .tm-label { font-weight: bold; font-size: 13px; display: block; margin-bottom: 5px; text-align: center; color: #333; }
-    .tm-slider-row { display: flex; align-items: center; justify-content: space-between; font-size: 10px; font-weight: bold; color: #555; }
-    .tm-slider-row input { width: 70%; cursor: pointer; }
+    .time-machine-row label {
+        font-weight: bold;
+        color: #000;
+    }
 
     #loadingIndicator { 
         font-size: 11px; color: #666; margin-top: 5px; display: none; font-style: italic; 
@@ -106,14 +111,10 @@
 
     <div class="separator"></div>
     
-    <!-- TIME MACHINE CONTROLS -->
-    <div class="tm-container">
-        <span class="tm-label">Time Machine</span>
-        <div class="tm-slider-row">
-            <span>1880s</span>
-            <input type="range" min="0" max="1" step="0.01" value="1" oninput="updateTimeMachine(this.value)">
-            <span>Now</span>
-        </div>
+    <!-- Time Machine Checkbox -->
+    <div class="layer-row time-machine-row">
+        <input type="checkbox" id="chkTimeMachine" onchange="toggleTimeMachine(this.checked)">
+        <label for="chkTimeMachine">Time Machine</label>
     </div>
 
     <div class="layer-row">
@@ -203,7 +204,9 @@
     let currentSbiData = null; 
     let layer1880s = null;
     let savedViews = [];
-    let globalTimeMachineVal = 1.0; // Defaults to "Now"
+    
+    // Time Machine State (Boolean)
+    let isTimeMachineActive = false;
 
     // =========================================================
     // 3. LAYER MANAGEMENT (Historic Map & Time Machine)
@@ -214,58 +217,23 @@
             credit: '© National Library of Scotland / OS 1880s'
         });
         layer1880s = viewer.imageryLayers.addImageryProvider(provider);
-        // Initially shown but alpha 0 (because default TM is at 1.0 "Now")
-        layer1880s.show = true; 
-        layer1880s.alpha = 0.0;
+        // Initially hidden (Time Machine unchecked)
+        layer1880s.show = false; 
+        layer1880s.alpha = 1.0;
     }
     init1880sLayer();
 
-    // Core function to handle the Time Machine slider
-    function updateTimeMachine(val) {
-        globalTimeMachineVal = parseFloat(val);
-
-        // 1. Update 1880s Layer Opacity (Inverse of slider)
-        // Slider 1 (Right) = Modern = 1880s Invisible (0)
-        // Slider 0 (Left) = Historic = 1880s Visible (1)
+    function toggleTimeMachine(checked) {
+        isTimeMachineActive = checked;
+        
+        // 1. Toggle 1880s Layer Visibility
         if(layer1880s) {
-            layer1880s.alpha = 1.0 - globalTimeMachineVal;
-        }
-
-        // 2. Update Land Cover (SBI) Opacity
-        if(dsRPA) {
-            const entities = dsRPA.entities.values;
-            entities.forEach(entity => {
-                const desc = entity.properties.DESCRIPTION ? entity.properties.DESCRIPTION.getValue() : 'default';
-                const colorCss = landCoverColors[desc] || landCoverColors['default'];
-                const baseColor = Cesium.Color.fromCssColorString(colorCss);
-                
-                // Determine base max opacity (Woodland is usually solid, others translucent)
-                const baseMaxAlpha = (desc === 'Woodland' || desc === 'Natural Woodland') ? 1.0 : 0.6;
-                
-                // Calculate new alpha based on slider
-                const newAlpha = baseMaxAlpha * globalTimeMachineVal;
-
-                if(entity.polygon) {
-                    entity.polygon.material = baseColor.withAlpha(newAlpha);
-                }
-            });
-        }
-
-        // 3. Update Vegetation (Custom) Opacity
-        if(dsCustom) {
-            const entities = dsCustom.entities.values;
-            const woodlandColor = Cesium.Color.fromCssColorString(landCoverColors['Woodland']);
-            
-            entities.forEach(entity => {
-                if(entity.polygon) {
-                    // This layer is usually solid, so just apply slider value directly
-                    entity.polygon.material = woodlandColor.withAlpha(globalTimeMachineVal);
-                }
-            });
+            layer1880s.show = isTimeMachineActive;
+            layer1880s.alpha = 1.0; // Max opacity as requested
         }
         
-        // Note: dsMarathon (Route) and dsPopups (Blue Info) are intentionally excluded
-        // so they remain visible regardless of slider position.
+        // 2. Trigger updates for Vectors via CallbackProperties
+        viewer.scene.requestRender();
     }
 
     // =========================================================
@@ -293,9 +261,6 @@
 
         loader.innerText = "Loading marathon route...";
         await loadMarathonRoute();
-        
-        // Ensure visual state matches slider on load
-        updateTimeMachine(globalTimeMachineVal);
 
         loader.innerText = "All data loaded successfully!";
         setTimeout(() => { loader.style.display = 'none'; }, 2000);
@@ -307,7 +272,7 @@
       }
     }
 
-    // --- A. Load Popup Layer (Invisible polygons + Info pins) ---
+    // --- A. Load Popup Layer ---
     async function loadPopupLayer(geojsonData) {
         if (dsPopups) viewer.dataSources.remove(dsPopups);
 
@@ -320,46 +285,25 @@
         });
 
         const entities = dsPopups.entities.values;
-        
-        // Create info pin canvas (blue circle with white "i")
         const canvas = document.createElement('canvas');
-        canvas.width = 64;
-        canvas.height = 64;
+        canvas.width = 64; canvas.height = 64;
         const ctx = canvas.getContext('2d');
-        
-        // Blue circle background
-        ctx.fillStyle = '#4facfe';
-        ctx.beginPath();
-        ctx.arc(32, 32, 28, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // White border
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-        
-        // White "i" text
-        ctx.fillStyle = 'white';
-        ctx.font = 'bold 40px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('i', 32, 34);
+        ctx.fillStyle = '#4facfe'; ctx.beginPath(); ctx.arc(32, 32, 28, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = 'white'; ctx.lineWidth = 3; ctx.stroke();
+        ctx.fillStyle = 'white'; ctx.font = 'bold 40px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('i', 32, 34);
 
         entities.forEach((entity, index) => {
-            // Make polygon invisible
             if (entity.polygon) {
                 entity.polygon.material = Cesium.Color.TRANSPARENT;
                 entity.polygon.outline = false;
             }
 
-            // Calculate centroid
             let centroid;
             if (entity.polygon && entity.polygon.hierarchy) {
                 const positions = entity.polygon.hierarchy.getValue().positions;
                 centroid = Cesium.BoundingSphere.fromPoints(positions).center;
             }
 
-            // Create new entity for the pin
             if (centroid) {
                 const pinEntity = viewer.entities.add({
                     position: centroid,
@@ -370,21 +314,17 @@
                         heightReference: Cesium.HeightReference.NONE
                     }
                 });
-
-                // Tag for popup functionality
                 pinEntity.isPopupTarget = true;
                 pinEntity.popupName = `Feature ${index + 1}`;
-                
                 if (entity.properties && entity.properties.description) {
                     pinEntity.popupDescription = entity.properties.description.getValue();
                 }
             }
         });
-
         await viewer.dataSources.add(dsPopups);
     }
 
-    // --- B. Load SBI Data (No Popups) ---
+    // --- B. Load SBI Data (Landcover) ---
     async function loadSbiData(data) {
       const legend = document.getElementById('legendPanel');
       if(dsRPA) viewer.dataSources.remove(dsRPA);
@@ -402,22 +342,26 @@
           const desc = entity.properties.DESCRIPTION ? entity.properties.DESCRIPTION.getValue() : 'default';
           foundCategories.add(desc);
           const colorCss = landCoverColors[desc] || landCoverColors['default'];
-          const color = Cesium.Color.fromCssColorString(colorCss);
+          const baseColor = Cesium.Color.fromCssColorString(colorCss);
           
-          // Determine base opacity logic
-          const baseAlpha = (desc === 'Woodland' || desc === 'Natural Woodland') ? 1.0 : 0.6;
-          // Apply current slider value
-          const finalAlpha = baseAlpha * globalTimeMachineVal;
+          const maxAlpha = (desc === 'Woodland' || desc === 'Natural Woodland') ? 1.0 : 0.6;
 
           if(entity.polygon) {
               entity.polygon.outline = false;
               entity.polygon.height = 2;
               entity.polygon.extrudedHeight = undefined;
-              entity.polygon.material = color.withAlpha(finalAlpha);
+              
+              // CALLBACK PROPERTY FOR PERFORMANCE
+              entity.polygon.material = new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(function() {
+                  // If Time Machine ON: Hide (Alpha 0)
+                  // If Time Machine OFF: Show (Normal Alpha)
+                  return isTimeMachineActive ? baseColor.withAlpha(0.0) : baseColor.withAlpha(maxAlpha);
+              }, false));
           }
       }
       viewer.dataSources.add(dsRPA);
 
+      // Outlines
       const outlinesGeoJSON = { type: "FeatureCollection", features: [] };
       processedData.features.forEach(f => {
           if (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon') {
@@ -430,8 +374,11 @@
       const outlineEntities = dsOutlines.entities.values;
       for(let i=0; i<outlineEntities.length; i++) {
           if(outlineEntities[i].polyline) {
-              outlineEntities[i].polyline.material = Cesium.Color.BLACK;
               outlineEntities[i].polyline.width = 1.0;
+              // Hide outlines when Time Machine is ON
+              outlineEntities[i].polyline.material = new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(function() {
+                  return isTimeMachineActive ? Cesium.Color.BLACK.withAlpha(0.0) : Cesium.Color.BLACK;
+              }, false));
           }
       }
       viewer.dataSources.add(dsOutlines);
@@ -445,12 +392,12 @@
       if(document.getElementById('chkLegend').checked) legend.style.display = 'block';
     }
 
-    // --- C. Load Veg Data (No Popups) ---
+    // --- C. Load Veg Data (Vegetation) ---
     async function loadCustomData(geojsonObject) {
       if(dsCustom) viewer.dataSources.remove(dsCustom);
       dsCustom = await Cesium.GeoJsonDataSource.load(geojsonObject, { clampToGround: false });
       const entities = dsCustom.entities.values;
-      const woodlandColor = Cesium.Color.fromCssColorString(landCoverColors['Woodland']);
+      const baseWoodlandColor = Cesium.Color.fromCssColorString(landCoverColors['Woodland']);
 
       for (let i = 0; i < entities.length; i++) {
         const entity = entities[i];
@@ -458,15 +405,20 @@
           const heightValue = entity.properties.height.getValue();
           entity.polygon.height = 2;
           entity.polygon.extrudedHeight = heightValue + 2; 
-          // Apply current slider value
-          entity.polygon.material = woodlandColor.withAlpha(globalTimeMachineVal);
           entity.polygon.outline = false; 
+
+          // CALLBACK PROPERTY FOR PERFORMANCE
+          entity.polygon.material = new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(function() {
+              // If Time Machine ON: 85% Transparent (Alpha 0.15)
+              // If Time Machine OFF: 100% Opaque (Alpha 1.0)
+              return isTimeMachineActive ? baseWoodlandColor.withAlpha(0.15) : baseWoodlandColor.withAlpha(1.0);
+          }, false));
         }
       }
       viewer.dataSources.add(dsCustom);
     }
 
-    // --- D. Load Marathon Route (No Popups) ---
+    // --- D. Load Marathon Route (Always Visible) ---
     async function loadMarathonRoute() {
         if(dsMarathon) viewer.dataSources.remove(dsMarathon);
         try {
@@ -545,7 +497,8 @@
         return {
             name: name,
             view: { lon: Cesium.Math.toDegrees(p.longitude), lat: Cesium.Math.toDegrees(p.latitude), h: p.height, head: Cesium.Math.toDegrees(viewer.camera.heading), pitch: Cesium.Math.toDegrees(viewer.camera.pitch), roll: Cesium.Math.toDegrees(viewer.camera.roll) },
-            // Removed os1880s layer tracking as it's now controlled by the global slider
+            // Save Time Machine Boolean
+            timeMachineActive: document.getElementById('chkTimeMachine').checked,
             legend: document.getElementById('chkLegend').checked
         };
     }
@@ -585,6 +538,13 @@
         if(i==="") return;
         const s = savedViews[i];
         viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(s.view.lon, s.view.lat, s.view.h), orientation: { heading: Cesium.Math.toRadians(s.view.head), pitch: Cesium.Math.toRadians(s.view.pitch), roll: Cesium.Math.toRadians(s.view.roll) }});
+        
+        // Restore Time Machine State
+        if (s.timeMachineActive !== undefined) {
+            const chk = document.getElementById('chkTimeMachine');
+            chk.checked = s.timeMachineActive;
+            toggleTimeMachine(s.timeMachineActive);
+        }
     }
 
     window.addEventListener('load', () => { loadDatasets(); });
