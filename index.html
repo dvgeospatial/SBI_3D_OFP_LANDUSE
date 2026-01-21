@@ -63,8 +63,14 @@
 
     .layer-row { display: flex; align-items: center; font-size: 13px; cursor: pointer; margin-bottom: 5px; color: #333; flex-wrap: wrap; }
     .layer-row input[type="checkbox"] { margin-right: 8px; cursor: pointer; }
-    .slider-container { width: 100%; margin-top: 5px; display: flex; align-items: center; justify-content: space-between; font-size: 11px;}
-    .slider-container input { width: 70%; }
+    
+    /* Time Machine Styles */
+    .tm-container { 
+        margin: 10px 0; padding: 8px; background: #f0f0f0; border-radius: 4px; border: 1px solid #ddd;
+    }
+    .tm-label { font-weight: bold; font-size: 13px; display: block; margin-bottom: 5px; text-align: center; color: #333; }
+    .tm-slider-row { display: flex; align-items: center; justify-content: space-between; font-size: 10px; font-weight: bold; color: #555; }
+    .tm-slider-row input { width: 70%; cursor: pointer; }
 
     #loadingIndicator { 
         font-size: 11px; color: #666; margin-top: 5px; display: none; font-style: italic; 
@@ -100,12 +106,13 @@
 
     <div class="separator"></div>
     
-    <div class="layer-row">
-        <input type="checkbox" id="chk1880s" onchange="toggle1880sLayer(this.checked)">
-        <label for="chk1880s" style="font-weight:bold;">1880s OS Six Inch</label>
-        <div class="slider-container" id="slider1880s" style="display:none;">
-            <span>Opacity:</span>
-            <input type="range" min="0" max="1" step="0.1" value="1" oninput="set1880sOpacity(this.value)">
+    <!-- TIME MACHINE CONTROLS -->
+    <div class="tm-container">
+        <span class="tm-label">Time Machine</span>
+        <div class="tm-slider-row">
+            <span>1880s</span>
+            <input type="range" min="0" max="1" step="0.01" value="1" oninput="updateTimeMachine(this.value)">
+            <span>Now</span>
         </div>
     </div>
 
@@ -143,7 +150,6 @@
     const MARATHON_URL = 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FhedgerowMarathonSimpleLine_EPSG_3587.geojson?alt=media&token=3ece0637-a19d-4837-acaf-779f955be40e';
     const OS_1880_URL = 'https://mapseries-tilesets.s3.amazonaws.com/os/six-inch-norfolk/{z}/{x}/{y}.png';
 
-    // The Specific GeoJSON from POP_UP_CODE
     const sampleGeoJSON = {
       "type": "FeatureCollection",
       "features": [
@@ -197,9 +203,10 @@
     let currentSbiData = null; 
     let layer1880s = null;
     let savedViews = [];
+    let globalTimeMachineVal = 1.0; // Defaults to "Now"
 
     // =========================================================
-    // 3. LAYER MANAGEMENT (Historic Map)
+    // 3. LAYER MANAGEMENT (Historic Map & Time Machine)
     // =========================================================
     function init1880sLayer() {
         const provider = new Cesium.UrlTemplateImageryProvider({
@@ -207,20 +214,58 @@
             credit: '© National Library of Scotland / OS 1880s'
         });
         layer1880s = viewer.imageryLayers.addImageryProvider(provider);
-        layer1880s.show = false; 
-        layer1880s.alpha = 1.0;
+        // Initially shown but alpha 0 (because default TM is at 1.0 "Now")
+        layer1880s.show = true; 
+        layer1880s.alpha = 0.0;
     }
     init1880sLayer();
 
-    function toggle1880sLayer(checked) {
-        if(layer1880s) {
-            layer1880s.show = checked;
-            document.getElementById('slider1880s').style.display = checked ? 'flex' : 'none';
-        }
-    }
+    // Core function to handle the Time Machine slider
+    function updateTimeMachine(val) {
+        globalTimeMachineVal = parseFloat(val);
 
-    function set1880sOpacity(value) {
-        if(layer1880s) layer1880s.alpha = parseFloat(value);
+        // 1. Update 1880s Layer Opacity (Inverse of slider)
+        // Slider 1 (Right) = Modern = 1880s Invisible (0)
+        // Slider 0 (Left) = Historic = 1880s Visible (1)
+        if(layer1880s) {
+            layer1880s.alpha = 1.0 - globalTimeMachineVal;
+        }
+
+        // 2. Update Land Cover (SBI) Opacity
+        if(dsRPA) {
+            const entities = dsRPA.entities.values;
+            entities.forEach(entity => {
+                const desc = entity.properties.DESCRIPTION ? entity.properties.DESCRIPTION.getValue() : 'default';
+                const colorCss = landCoverColors[desc] || landCoverColors['default'];
+                const baseColor = Cesium.Color.fromCssColorString(colorCss);
+                
+                // Determine base max opacity (Woodland is usually solid, others translucent)
+                const baseMaxAlpha = (desc === 'Woodland' || desc === 'Natural Woodland') ? 1.0 : 0.6;
+                
+                // Calculate new alpha based on slider
+                const newAlpha = baseMaxAlpha * globalTimeMachineVal;
+
+                if(entity.polygon) {
+                    entity.polygon.material = baseColor.withAlpha(newAlpha);
+                }
+            });
+        }
+
+        // 3. Update Vegetation (Custom) Opacity
+        if(dsCustom) {
+            const entities = dsCustom.entities.values;
+            const woodlandColor = Cesium.Color.fromCssColorString(landCoverColors['Woodland']);
+            
+            entities.forEach(entity => {
+                if(entity.polygon) {
+                    // This layer is usually solid, so just apply slider value directly
+                    entity.polygon.material = woodlandColor.withAlpha(globalTimeMachineVal);
+                }
+            });
+        }
+        
+        // Note: dsMarathon (Route) and dsPopups (Blue Info) are intentionally excluded
+        // so they remain visible regardless of slider position.
     }
 
     // =========================================================
@@ -248,6 +293,9 @@
 
         loader.innerText = "Loading marathon route...";
         await loadMarathonRoute();
+        
+        // Ensure visual state matches slider on load
+        updateTimeMachine(globalTimeMachineVal);
 
         loader.innerText = "All data loaded successfully!";
         setTimeout(() => { loader.style.display = 'none'; }, 2000);
@@ -355,12 +403,17 @@
           foundCategories.add(desc);
           const colorCss = landCoverColors[desc] || landCoverColors['default'];
           const color = Cesium.Color.fromCssColorString(colorCss);
+          
+          // Determine base opacity logic
+          const baseAlpha = (desc === 'Woodland' || desc === 'Natural Woodland') ? 1.0 : 0.6;
+          // Apply current slider value
+          const finalAlpha = baseAlpha * globalTimeMachineVal;
 
           if(entity.polygon) {
               entity.polygon.outline = false;
               entity.polygon.height = 2;
               entity.polygon.extrudedHeight = undefined;
-              entity.polygon.material = (desc === 'Woodland' || desc === 'Natural Woodland') ? color : color.withAlpha(0.6);
+              entity.polygon.material = color.withAlpha(finalAlpha);
           }
       }
       viewer.dataSources.add(dsRPA);
@@ -405,7 +458,8 @@
           const heightValue = entity.properties.height.getValue();
           entity.polygon.height = 2;
           entity.polygon.extrudedHeight = heightValue + 2; 
-          entity.polygon.material = woodlandColor;
+          // Apply current slider value
+          entity.polygon.material = woodlandColor.withAlpha(globalTimeMachineVal);
           entity.polygon.outline = false; 
         }
       }
@@ -491,7 +545,8 @@
         return {
             name: name,
             view: { lon: Cesium.Math.toDegrees(p.longitude), lat: Cesium.Math.toDegrees(p.latitude), h: p.height, head: Cesium.Math.toDegrees(viewer.camera.heading), pitch: Cesium.Math.toDegrees(viewer.camera.pitch), roll: Cesium.Math.toDegrees(viewer.camera.roll) },
-            layers: { os1880s: { show: document.getElementById('chk1880s').checked, alpha: layer1880s ? layer1880s.alpha : 1 }, legend: document.getElementById('chkLegend').checked }
+            // Removed os1880s layer tracking as it's now controlled by the global slider
+            legend: document.getElementById('chkLegend').checked
         };
     }
 
@@ -530,11 +585,6 @@
         if(i==="") return;
         const s = savedViews[i];
         viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(s.view.lon, s.view.lat, s.view.h), orientation: { heading: Cesium.Math.toRadians(s.view.head), pitch: Cesium.Math.toRadians(s.view.pitch), roll: Cesium.Math.toRadians(s.view.roll) }});
-        if(s.layers) {
-            document.getElementById('chk1880s').checked = s.layers.os1880s.show;
-            toggle1880sLayer(s.layers.os1880s.show);
-            if(layer1880s) layer1880s.alpha = s.layers.os1880s.alpha;
-        }
     }
 
     window.addEventListener('load', () => { loadDatasets(); });
