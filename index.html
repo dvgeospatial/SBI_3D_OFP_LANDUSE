@@ -7,9 +7,9 @@
   <!-- =========================================================
        LIBRARIES
        ========================================================= -->
-  <!-- CesiumJS -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.110.0/Cesium.js"></script>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.110.0/Widgets/widgets.css" rel="stylesheet">
+  <!-- CesiumJS (UPDATED to 1.121 to support ClippingPolygon) -->
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.121/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.121/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
   <!-- Proj4 for Coordinate Transformation (BNG to WGS84) -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.0/dist/proj4.js"></script>
   <!-- Turf.js for Geometry Processing -->
@@ -127,7 +127,6 @@
     // 1. CONFIGURATION & CONSTANTS
     // =========================================================
     
-    // Data URLs
     const URLS = {
         LANDCOVERS: 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FMASSINGHAM_FARM_PARTNERSHIP%2Fsbi_landcovers_that_intersect_route_4326.geojson?alt=media&token=53725055-df03-4de6-ad4c-2568acca11c5',
         VEGETATION: 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FMASSINGHAM_FARM_PARTNERSHIP%2Fveg_on_parcels_that_intersect_route_4326.geojson?alt=media&token=f47ace15-22b0-4c95-860d-6563a2781913',
@@ -135,7 +134,6 @@
         HISTORIC_MAP: 'https://mapseries-tilesets.s3.amazonaws.com/os/six-inch-norfolk/{z}/{x}/{y}.png'
     };
 
-    // Style Definitions
     const landCoverColors = {
         'Arable Land': '#F0E68C', 'Permanent Grassland': '#32CD32', 'Woodland': '#228B22',
         'Natural Woodland': '#006400', 'Pond': '#4682B4', 'Rivers and streams type 3': '#1E90FF',
@@ -145,10 +143,8 @@
         'default': '#FFeda0'
     };
 
-    // Coordinate Systems
     proj4.defs("EPSG:27700", "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs");
 
-    // Sample Data for Popups (The "Blue i" points)
     const popupGeoJSON = {
       "type": "FeatureCollection",
       "features": [
@@ -161,103 +157,29 @@
     };
 
     // =========================================================
-    // 2. CLIPPING GEOMETRY (Added for Time Machine)
+    // 2. CLIPPING GEOMETRY
     // =========================================================
     const norwichPoints = [
-0.623699, 52.79778,
-0.623045, 52.795548,
-0.621747, 52.794024,
-0.620921, 52.792927,
-0.620105, 52.790189,
-0.619515, 52.788107,
-0.618775, 52.786491,
-0.616522, 52.784674,
-0.612295, 52.780858,
-0.609634, 52.778334,
-0.614741, 52.777432,
-0.615921, 52.777497,
-0.615867, 52.776549,
-0.61429, 52.776484,
-0.613732, 52.774459,
-0.618839, 52.774044,
-0.618088, 52.770227,
-0.618678, 52.76989,
-0.623099, 52.771996,
-0.626462, 52.770383,
-0.62798, 52.772658,
-0.627894, 52.772684,
-0.627503, 52.772759,
-0.627605, 52.77332,
-0.627444, 52.773541,
-0.627546, 52.773622,
-0.62797, 52.77381,
-0.627766, 52.773969,
-0.628806, 52.774534,
-0.62982, 52.774787,
-0.63099, 52.775245,
-0.631869, 52.775413,
-0.630475, 52.77714,
-0.62989, 52.777205,
-0.628747, 52.778733,
-0.62731, 52.778574,
-0.626848, 52.781637,
-0.625942, 52.781647,
-0.626607, 52.782776,
-0.629611, 52.781916,
-0.629922, 52.781968,
-0.629997, 52.783402,
-0.630308, 52.784583,
-0.628324, 52.784921,
-0.628356, 52.785154,
-0.63092, 52.785128,
-0.633591, 52.785388,
-0.633527, 52.785557,
-0.632347, 52.786997,
-0.631869, 52.787847,
-0.634788, 52.788308,
-0.634755, 52.788635,
-0.634841, 52.789206,
-0.63475, 52.789605,
-0.634986, 52.789956,
-0.635319, 52.790037,
-0.63548, 52.789933,
-0.635523, 52.79004,
-0.635469, 52.79211,
-0.636134, 52.792434,
-0.637293, 52.793381,
-0.638173, 52.794601,
-0.636413, 52.795743,
-0.633988, 52.796612,
-0.63122, 52.797157,
-0.631076, 52.797121,
-0.630941, 52.796301,
-0.628045, 52.796314,
-0.626553, 52.79656,
-0.625749, 52.797734,
-0.623941, 52.797773,
-0.623699, 52.79778
-
+        0.623989, 52.799285, 0.608969, 52.778263, 0.618153, 52.769539,
+        0.626736, 52.77011, 0.632658, 52.775355, 0.638838, 52.794822,
+        0.634632, 52.796897, 0.623989, 52.799285
     ];
     
-    // Create Cartesian array and Bounding Rectangle
     const polygonCartesians = Cesium.Cartesian3.fromDegreesArray(norwichPoints);
     const boundingRectangle = Cesium.Rectangle.fromCartesianArray(polygonCartesians);
 
     // =========================================================
     // 3. GLOBAL STATE
     // =========================================================
-    let dsRPA = null;       // Landcovers
-    let dsOutlines = null;  // Landcover Outlines
-    let dsCustom = null;    // Vegetation Height
-    let dsMarathon = null;  // Route
-    let dsPopups = null;    // Info Points
-    let layer1880s = null;  // Historic Map Layer
+    let dsRPA = null, dsOutlines = null, dsCustom = null, dsMarathon = null, dsPopups = null;
+    let layer1880s = null;
     let isTimeMachineActive = false;
-    let currentSbiData = null; // Stored for legend toggling
+    let currentSbiData = null;
 
     // =========================================================
     // 4. VIEWER INITIALIZATION
     // =========================================================
+    // CRITICAL: webgl: { alpha: true } is required for transparency (clipping effect)
     const viewer = new Cesium.Viewer('cesiumContainer', {
       terrainProvider: undefined,
       baseLayerPicker: false,
@@ -266,6 +188,9 @@
       scene3DOnly: true,
       infoBox: false, 
       selectionIndicator: false,
+      contextOptions: {
+        webgl: { alpha: true }
+      },
       baseLayer: new Cesium.ImageryLayer(new Cesium.UrlTemplateImageryProvider({
         url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
         subdomains: ['a', 'b', 'c', 'd'],
@@ -277,11 +202,10 @@
     viewer.scene.postProcessStages.fxaa.enabled = true; 
 
     // Initialize Historic Map (Hidden by default)
-    // NOTE: Added rectangle parameter for optimization
     const historicProvider = new Cesium.UrlTemplateImageryProvider({
         url: URLS.HISTORIC_MAP,
         credit: '© National Library of Scotland / OS 1880s',
-        rectangle: boundingRectangle // <--- Optimization: Only fetch tiles here
+        rectangle: boundingRectangle 
     });
     layer1880s = viewer.imageryLayers.addImageryProvider(historicProvider);
     layer1880s.show = false; 
@@ -295,23 +219,19 @@
       loader.style.display = 'block';
       
       try {
-        // 1. Load Info Popups
         loader.innerText = "Loading annotations...";
         await loadPopupLayer(popupGeoJSON);
 
-        // 2. Load Landcovers (SBI)
         loader.innerText = "Loading landcovers...";
         const landcoversResponse = await fetch(URLS.LANDCOVERS);
         const landcoversData = await landcoversResponse.json();
         await loadSbiData(landcoversData);
 
-        // 3. Load Vegetation (Height)
         loader.innerText = "Loading vegetation...";
         const vegResponse = await fetch(URLS.VEGETATION);
         const vegData = await vegResponse.json();
         await loadCustomData(vegData);
 
-        // 4. Load Route
         loader.innerText = "Loading route...";
         await loadMarathonRoute();
 
@@ -324,7 +244,6 @@
       }
     }
 
-    // A. Load Popups (Blue 'i' markers)
     async function loadPopupLayer(geojsonData) {
         const processedData = processGeoJSON(geojsonData, 30); 
         dsPopups = await Cesium.GeoJsonDataSource.load(processedData, {
@@ -333,7 +252,6 @@
             clampToGround: false
         });
 
-        // Create Pin Canvas
         const canvas = document.createElement('canvas');
         canvas.width = 64; canvas.height = 64;
         const ctx = canvas.getContext('2d');
@@ -341,33 +259,24 @@
         ctx.strokeStyle = 'white'; ctx.lineWidth = 3; ctx.stroke();
         ctx.fillStyle = 'white'; ctx.font = 'bold 40px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('i', 32, 34);
 
-        // Convert Features to Pins
         const entities = dsPopups.entities.values;
         entities.forEach((entity, index) => {
-            // Hide the original polygon geometry
             if (entity.polygon) {
                 entity.polygon.material = Cesium.Color.TRANSPARENT;
                 entity.polygon.outline = false;
             }
-
-            // Find center and place pin
             let centroid;
             if (entity.polygon && entity.polygon.hierarchy) {
                 const positions = entity.polygon.hierarchy.getValue().positions;
                 centroid = Cesium.BoundingSphere.fromPoints(positions).center;
             }
-
             if (centroid) {
                 const pinEntity = viewer.entities.add({
                     position: centroid,
                     billboard: {
-                        image: canvas,
-                        scale: 0.5,
-                        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-                        heightReference: Cesium.HeightReference.NONE
+                        image: canvas, scale: 0.5, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, heightReference: Cesium.HeightReference.NONE
                     }
                 });
-                // Attach data for mouseover
                 pinEntity.isPopupTarget = true;
                 pinEntity.popupName = `Feature ${index + 1}`;
                 if (entity.properties && entity.properties.description) {
@@ -378,7 +287,6 @@
         await viewer.dataSources.add(dsPopups);
     }
 
-    // B. Load Landcovers (Polygons)
     async function loadSbiData(data) {
       const legend = document.getElementById('legendPanel');
       const processedData = processGeoJSON(data); 
@@ -392,7 +300,6 @@
           const entity = entities[i];
           const desc = entity.properties.DESCRIPTION ? entity.properties.DESCRIPTION.getValue() : 'default';
           foundCategories.add(desc);
-          
           const colorCss = landCoverColors[desc] || landCoverColors['default'];
           const baseColor = Cesium.Color.fromCssColorString(colorCss);
           const maxAlpha = (desc === 'Woodland' || desc === 'Natural Woodland') ? 1.0 : 0.6;
@@ -401,8 +308,6 @@
               entity.polygon.outline = false;
               entity.polygon.height = 2;
               entity.polygon.extrudedHeight = undefined;
-              
-              // Dynamic Material for Time Machine
               entity.polygon.material = new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(function() {
                   return isTimeMachineActive ? baseColor.withAlpha(0.0) : baseColor.withAlpha(maxAlpha);
               }, false));
@@ -410,7 +315,6 @@
       }
       viewer.dataSources.add(dsRPA);
 
-      // Create Black Outlines
       const outlinesGeoJSON = { type: "FeatureCollection", features: [] };
       processedData.features.forEach(f => {
           if (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon') {
@@ -424,7 +328,6 @@
       for(let i=0; i<outlineEntities.length; i++) {
           if(outlineEntities[i].polyline) {
               outlineEntities[i].polyline.width = 1.0;
-              // Hide outlines when Time Machine is ON
               outlineEntities[i].polyline.material = new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(function() {
                   return isTimeMachineActive ? Cesium.Color.BLACK.withAlpha(0.0) : Cesium.Color.BLACK;
               }, false));
@@ -433,7 +336,6 @@
       viewer.dataSources.add(dsOutlines);
       viewer.zoomTo(dsRPA);
 
-      // Build Legend
       legend.innerHTML = '<h4>Land Cover</h4>';
       Array.from(foundCategories).sort().forEach(c => {
           const color = landCoverColors[c] || landCoverColors['default'];
@@ -442,12 +344,10 @@
       if(document.getElementById('chkLegend').checked) legend.style.display = 'block';
     }
 
-    // C. Load Vegetation (Extruded Polygons)
     async function loadCustomData(geojsonObject) {
       dsCustom = await Cesium.GeoJsonDataSource.load(geojsonObject, { clampToGround: false });
       const entities = dsCustom.entities.values;
       const baseWoodlandColor = Cesium.Color.fromCssColorString(landCoverColors['Woodland']);
-
       for (let i = 0; i < entities.length; i++) {
         const entity = entities[i];
         if (entity.properties && entity.properties.height && entity.polygon) {
@@ -455,8 +355,6 @@
           entity.polygon.height = 2;
           entity.polygon.extrudedHeight = heightValue + 2; 
           entity.polygon.outline = false; 
-
-          // Dynamic Transparency for Time Machine
           entity.polygon.material = new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(function() {
               return isTimeMachineActive ? baseWoodlandColor.withAlpha(0.15) : baseWoodlandColor.withAlpha(1.0);
           }, false));
@@ -465,27 +363,22 @@
       viewer.dataSources.add(dsCustom);
     }
 
-    // D. Load Marathon Route
     async function loadMarathonRoute() {
         try {
             const response = await fetch(URLS.ROUTE);
             const data = await response.json();
             const processedData = processGeoJSON(data, 30);
             dsMarathon = await Cesium.GeoJsonDataSource.load(processedData, { clampToGround: false });
-            
             const entities = dsMarathon.entities.values;
             for (let i = 0; i < entities.length; i++) {
                 if (entities[i].polyline) {
                     entities[i].polyline.width = 5;
                     entities[i].polyline.material = new Cesium.PolylineDashMaterialProperty({
-                        color: Cesium.Color.RED,
-                        gapColor: Cesium.Color.TRANSPARENT,
-                        dashLength: 20
+                        color: Cesium.Color.RED, gapColor: Cesium.Color.TRANSPARENT, dashLength: 20
                     });
                 }
             }
             viewer.dataSources.add(dsMarathon);
-            
             const legend = document.getElementById('legendPanel');
             if(!legend.innerHTML.includes('<h4>Land Cover</h4>')) legend.innerHTML = '<h4>Legend</h4>' + legend.innerHTML;
             legend.innerHTML += `<div class="legend-item"><i style="border:none; border-bottom: 3px dashed yellow; background:none; height:10px; margin-top:5px;"></i><span>Marathon Route</span></div>`;
@@ -495,24 +388,16 @@
     // =========================================================
     // 6. HELPER FUNCTIONS
     // =========================================================
-    
-    // Geometry Processor: Reprojects BNG to WGS84 if needed and adjusts height
     function processGeoJSON(geojson, heightOffset = 2) {
         let cloned = JSON.parse(JSON.stringify(geojson));
         let isBNG = false;
-        try {
-            if (getFirstCoordinate(cloned.features[0].geometry)[0] > 180) isBNG = true;
-        } catch(e) {}
-
+        try { if (getFirstCoordinate(cloned.features[0].geometry)[0] > 180) isBNG = true; } catch(e) {}
         const transformFn = (coords) => {
             if (isBNG) {
                 const wgs = proj4('EPSG:27700', 'EPSG:4326', coords);
                 return [wgs[0], wgs[1], heightOffset];
-            } else {
-                return [coords[0], coords[1], heightOffset];
-            }
+            } else { return [coords[0], coords[1], heightOffset]; }
         };
-
         const transformGeometry = (geometry) => {
             if (geometry.type === 'Polygon' || geometry.type === 'MultiLineString') {
                 geometry.coordinates = geometry.coordinates.map(ring => ring.map(transformFn));
@@ -522,7 +407,6 @@
                 geometry.coordinates = geometry.coordinates.map(transformFn);
             }
         };
-
         if (cloned.type === 'FeatureCollection') cloned.features.forEach(f => transformGeometry(f.geometry));
         else if (cloned.type === 'Feature') transformGeometry(cloned.geometry);
         return turf.rewind(cloned, {reverse: false, mutate: true});
@@ -537,39 +421,34 @@
     }
 
     // =========================================================
-    // 7. INTERACTION HANDLERS
+    // 7. INTERACTION HANDLERS (UPDATED)
     // =========================================================
     
-    // Time Machine Logic: Toggles Historic Map & Updates Globe Clipping
     function toggleTimeMachine(checked) {
         isTimeMachineActive = checked;
         
         // 1. Show/Hide Raster Layer
-        if(layer1880s) {
-            layer1880s.show = isTimeMachineActive;
-        }
+        if(layer1880s) layer1880s.show = isTimeMachineActive;
 
-        // 2. Apply Clipping Polygon (Island Effect)
+        // 2. Apply Globe Clipping (Irregular Polygon)
+        // Note: This requires CesiumJS 1.117+
         if (checked) {
             viewer.scene.globe.clippingPolygons = new Cesium.ClippingPolygonCollection({
-                polygons: [
-                    new Cesium.ClippingPolygon({
-                        positions: polygonCartesians
-                    })
-                ],
+                polygons: [ new Cesium.ClippingPolygon({ positions: polygonCartesians }) ],
                 enabled: true,
-                inverse: true // Shows ONLY inside the polygon
+                inverse: true
             });
-            // Optional: Hide atmosphere to enhance the "floating" look
             viewer.scene.skyAtmosphere.show = false;
+            // Matches clip demo aesthetic
+            viewer.scene.backgroundColor = Cesium.Color.WHITESMOKE; 
         } else {
-            // Remove clipping
             viewer.scene.globe.clippingPolygons = undefined; 
-            // Restore atmosphere
             viewer.scene.skyAtmosphere.show = true;
+            // Restore default grey
+            viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#dcdcdc');
         }
         
-        // 3. Trigger render update for CallbackProperties on vectors
+        // 3. Trigger render update for CallbackProperties
         viewer.scene.requestRender();
     }
 
@@ -577,16 +456,12 @@
         document.getElementById('legendPanel').style.display = (checked && currentSbiData) ? 'block' : 'none';
     }
 
-    // Mouse Hover Logic for Popups
     const popup = document.getElementById('hoverPopup');
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
-
     handler.setInputAction(function(movement) {
       const pickedObject = viewer.scene.pick(movement.endPosition);
-
       if (Cesium.defined(pickedObject) && pickedObject.id instanceof Cesium.Entity) {
         const entity = pickedObject.id;
-
         if (entity.isPopupTarget) {
             const desc = entity.popupDescription || '';
             popup.innerHTML = `<strong>${entity.popupName}</strong>${desc}`;
@@ -604,7 +479,6 @@
       }
     }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
-    // Start Data Loading
     window.addEventListener('load', initData);
 
   </script>
