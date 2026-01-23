@@ -115,29 +115,13 @@
     // 1. DATA & CONSTANTS
     // =========================================================
     
-    // Hardcoded Mask GeoJSON (WGS84)
-    const maskGeoJSON = {
-      "type": "FeatureCollection",
-      "features": [
-        {
-          "type": "Feature",
-          "properties": { "name": "Norfolk Bounds" },
-          "geometry": {
-            "type": "Polygon",
-            "coordinates": [
-              [[0.2,52.8],[0.4,52.95],[0.8,53],[1.2,52.9],[1.7,52.7],[1.75,52.5],[1.4,52.35],[0.7,52.4],[0.2,52.6],[0.2,52.8]],
-              [[0.609505,52.778295],[0.614859,52.777412],[0.615964,52.777471],[0.615739,52.776523],[0.61428,52.776484],[0.613743,52.774414],[0.618786,52.774044],[0.618067,52.770188],[0.618303,52.76965],[0.623163,52.771876],[0.6265,52.770305],[0.628034,52.772629],[0.627583,52.772765],[0.62768,52.773259],[0.62753,52.773538],[0.62798,52.7737],[0.627905,52.773972],[0.629032,52.774498],[0.630963,52.775141],[0.631971,52.775374],[0.630512,52.777179],[0.629965,52.777205],[0.628721,52.778723],[0.627369,52.778616],[0.627047,52.780495],[0.626843,52.78166],[0.625995,52.781666],[0.626623,52.782757],[0.629831,52.781871],[0.630008,52.78237],[0.630008,52.78336],[0.630206,52.784564],[0.628324,52.784878],[0.62835,52.785177],[0.631076,52.785141],[0.633634,52.785394],[0.632685,52.786601],[0.631869,52.787853],[0.634788,52.788314],[0.634857,52.7892],[0.634755,52.789459],[0.634793,52.789787],[0.635013,52.789943],[0.635249,52.79005],[0.635533,52.789878],[0.635351,52.792162],[0.636038,52.79246],[0.635877,52.79283],[0.636252,52.793024],[0.636531,52.79329],[0.637035,52.793219],[0.638098,52.79462],[0.636928,52.795444],[0.635158,52.796229],[0.633205,52.796781],[0.631135,52.797183],[0.630877,52.796366],[0.62813,52.796314],[0.62665,52.796534],[0.625834,52.797741],[0.623474,52.79778],[0.622959,52.795496],[0.620985,52.793368],[0.619268,52.787672],[0.618582,52.786426],[0.614033,52.782585],[0.609505,52.778295]]
-            ]
-          }
-        }
-      ]
-    };
-
     const URLS = {
         LANDCOVERS: 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FMASSINGHAM_FARM_PARTNERSHIP%2Fsbi_landcovers_that_intersect_route_4326.geojson?alt=media&token=53725055-df03-4de6-ad4c-2568acca11c5',
         VEGETATION: 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FMASSINGHAM_FARM_PARTNERSHIP%2Fveg_on_parcels_that_intersect_route_4326.geojson?alt=media&token=f47ace15-22b0-4c95-860d-6563a2781913',
         ROUTE: 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FhedgerowMarathonSimpleLine_EPSG_3587.geojson?alt=media&token=3ece0637-a19d-4837-acaf-779f955be40e',
-        HISTORIC_MAP: 'https://mapseries-tilesets.s3.amazonaws.com/os/six-inch-norfolk/{z}/{x}/{y}.png'
+        HISTORIC_MAP: 'https://mapseries-tilesets.s3.amazonaws.com/os/six-inch-norfolk/{z}/{x}/{y}.png',
+        // Updated Mask URL
+        MASK: 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FMASSINGHAM_FARM_PARTNERSHIP%2FMASK_OS_SIX_INCH.geojson?alt=media&token=ed3561b3-17af-405f-95f3-3c5fc271f20a'
     };
 
     const landCoverColors = {
@@ -360,34 +344,43 @@
     }
     
     // =========================================================================
-    // LOAD MASK: HARD-CODED WGS84 GEOJSON + WORKING EXAMPLE LOGIC
+    // LOAD MASK: UPDATED TO FETCH FROM URL
     // =========================================================================
     async function loadMaskLayer() {
-        // Use the constant 'maskGeoJSON' directly
-        // Note: clampToGround: false allows manual height control via HeightReference
-        dsMask = await Cesium.GeoJsonDataSource.load(maskGeoJSON, { 
-            clampToGround: false 
-        });
-        
-        const entities = dsMask.entities.values;
-        const staticMaterial = Cesium.Color.WHITE.withAlpha(0.8);
+        try {
+            // Fetch mask data from URL
+            const response = await fetch(URLS.MASK);
+            const maskData = await response.json();
+            
+            // Process (reproject if necessary)
+            const processedMask = processGeoJSON(maskData, 0);
 
-        for (let i = 0; i < entities.length; i++) {
-            const entity = entities[i];
-            if (entity.polygon) {
-                // Style: White, 80%
-                entity.polygon.material = staticMaterial;
-                entity.polygon.outline = false;
+            // Note: clampToGround: false allows manual height control via HeightReference
+            dsMask = await Cesium.GeoJsonDataSource.load(processedMask, { 
+                clampToGround: false 
+            });
+            
+            const entities = dsMask.entities.values;
+            const staticMaterial = Cesium.Color.WHITE.withAlpha(0.8);
 
-                // Height: Relative to Ground, 1 meter up
-                // This pattern matches your working example
-                entity.polygon.heightReference = Cesium.HeightReference.RELATIVE_TO_GROUND;
-                entity.polygon.height = 1.0; 
+            for (let i = 0; i < entities.length; i++) {
+                const entity = entities[i];
+                if (entity.polygon) {
+                    // Style: White, 80%
+                    entity.polygon.material = staticMaterial;
+                    entity.polygon.outline = false;
+
+                    // Height: Relative to Ground, 1 meter up
+                    entity.polygon.heightReference = Cesium.HeightReference.RELATIVE_TO_GROUND;
+                    entity.polygon.height = 1.0; 
+                }
             }
+            
+            dsMask.show = false;
+            viewer.dataSources.add(dsMask);
+        } catch (error) {
+            console.error("Error loading mask layer:", error);
         }
-        
-        dsMask.show = false;
-        viewer.dataSources.add(dsMask);
     }
 
     async function loadMarathonRoute() {
