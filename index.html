@@ -72,21 +72,6 @@
     #loadingIndicator { 
         font-size: 11px; color: #666; margin-top: 5px; display: none; font-style: italic; 
     }
-
-    /* --- LEGEND STYLES --- */
-    #legendPanel {
-      position: absolute; bottom: 30px; right: 10px;
-      background: rgba(255, 255, 255, 0.95); padding: 10px;
-      border-radius: 5px; z-index: 100; max-height: 400px;
-      overflow-y: auto; width: 220px; display: none;
-      box-shadow: 0 1px 5px rgba(0,0,0,0.2);
-    }
-    .legend-item { display: flex; align-items: center; margin-bottom: 4px; font-size: 12px; color: #333; }
-    .legend-item i {
-      width: 18px; height: 18px; float: left; margin-right: 8px;
-      opacity: 0.8; border: 1px solid #999; flex-shrink: 0;
-    }
-    h4 { margin: 0 0 10px 0; font-size: 14px; border-bottom: 1px solid #ccc; padding-bottom: 5px; color: #333; }
   </style>
 </head>
 <body>
@@ -100,14 +85,10 @@
         <input type="checkbox" id="chkTimeMachine" onchange="toggleTimeMachine(this.checked)">
         <label for="chkTimeMachine">Time Machine</label>
     </div>
-    <div class="layer-row">
-        <input type="checkbox" id="chkLegend" checked onchange="toggleLegend(this.checked)">
-        <label for="chkLegend">Show Legend</label>
-    </div>
     <div id="loadingIndicator">Initializing...</div>
   </div>
 
-  <div id="legendPanel"></div>
+  <!-- LEGEND REMOVED -->
   <div id="cesiumContainer"></div>
 
   <script>
@@ -120,7 +101,6 @@
         VEGETATION: 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FMASSINGHAM_FARM_PARTNERSHIP%2Fveg_on_parcels_that_intersect_route_4326.geojson?alt=media&token=f47ace15-22b0-4c95-860d-6563a2781913',
         ROUTE: 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FhedgerowMarathonSimpleLine_EPSG_3587.geojson?alt=media&token=3ece0637-a19d-4837-acaf-779f955be40e',
         HISTORIC_MAP: 'https://mapseries-tilesets.s3.amazonaws.com/os/six-inch-norfolk/{z}/{x}/{y}.png',
-        // Updated Mask URL
         MASK: 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FMASSINGHAM_FARM_PARTNERSHIP%2FMASK_OS_SIX_INCH.geojson?alt=media&token=ed3561b3-17af-405f-95f3-3c5fc271f20a'
     };
 
@@ -155,6 +135,11 @@
     // =========================================================
     // 3. VIEWER INITIALIZATION
     // =========================================================
+    
+    // *** FIX 1: Set Default View Rectangle BEFORE creating viewer ***
+    // Coordinates approx around Massingham/Norfolk based on your data
+    Cesium.Camera.DEFAULT_VIEW_RECTANGLE = Cesium.Rectangle.fromDegrees(0.1, 52.3, 1.8, 53.1);
+
     const viewer = new Cesium.Viewer('cesiumContainer', {
       imageryProvider: false, 
       baseLayerPicker: false,
@@ -265,18 +250,15 @@
     }
 
     async function loadSbiData(data) {
-      const legend = document.getElementById('legendPanel');
       const processedData = processGeoJSON(data, 0); 
       currentSbiData = processedData;
 
       dsRPA = await Cesium.GeoJsonDataSource.load(processedData, { clampToGround: false });
       const entities = dsRPA.entities.values;
-      const foundCategories = new Set();
 
       for (let i = 0; i < entities.length; i++) {
           const entity = entities[i];
           const desc = entity.properties.DESCRIPTION ? entity.properties.DESCRIPTION.getValue() : 'default';
-          foundCategories.add(desc);
           
           const colorCss = landCoverColors[desc] || landCoverColors['default'];
           const baseColor = Cesium.Color.fromCssColorString(colorCss);
@@ -312,14 +294,16 @@
           }
       }
       viewer.dataSources.add(dsOutlines);
-      viewer.zoomTo(dsRPA);
-
-      legend.innerHTML = '<h4>Land Cover</h4>';
-      Array.from(foundCategories).sort().forEach(c => {
-          const color = landCoverColors[c] || landCoverColors['default'];
-          legend.innerHTML += `<div class="legend-item"><i style="background:${color}"></i><span>${c}</span></div>`;
+      
+      // *** FIX 2: INSTANT FLYTO & HOME BUTTON OVERRIDE ***
+      // flyTo with duration 0 prevents the camera animation and just "snaps" to the data
+      viewer.flyTo(dsRPA, { duration: 0 });
+      
+      // Override Home Button behavior
+      viewer.homeButton.viewModel.command.beforeExecute.addEventListener(function(e) {
+          e.cancel = true;
+          viewer.flyTo(dsRPA, { duration: 2.0 }); // Smooth fly back to data on click
       });
-      if(document.getElementById('chkLegend').checked) legend.style.display = 'block';
     }
 
     async function loadCustomData(geojsonObject) {
@@ -344,21 +328,14 @@
     }
     
     // =========================================================================
-    // LOAD MASK: UPDATED TO FETCH FROM URL
+    // LOAD MASK
     // =========================================================================
     async function loadMaskLayer() {
         try {
-            // Fetch mask data from URL
             const response = await fetch(URLS.MASK);
             const maskData = await response.json();
-            
-            // Process (reproject if necessary)
             const processedMask = processGeoJSON(maskData, 0);
-
-            // Note: clampToGround: false allows manual height control via HeightReference
-            dsMask = await Cesium.GeoJsonDataSource.load(processedMask, { 
-                clampToGround: false 
-            });
+            dsMask = await Cesium.GeoJsonDataSource.load(processedMask, { clampToGround: false });
             
             const entities = dsMask.entities.values;
             const staticMaterial = Cesium.Color.WHITE.withAlpha(0.8);
@@ -366,16 +343,12 @@
             for (let i = 0; i < entities.length; i++) {
                 const entity = entities[i];
                 if (entity.polygon) {
-                    // Style: White, 80%
                     entity.polygon.material = staticMaterial;
                     entity.polygon.outline = false;
-
-                    // Height: Relative to Ground, 1 meter up
                     entity.polygon.heightReference = Cesium.HeightReference.RELATIVE_TO_GROUND;
                     entity.polygon.height = 1.0; 
                 }
             }
-            
             dsMask.show = false;
             viewer.dataSources.add(dsMask);
         } catch (error) {
@@ -402,10 +375,6 @@
                 }
             }
             viewer.dataSources.add(dsMarathon);
-            
-            const legend = document.getElementById('legendPanel');
-            if(!legend.innerHTML.includes('<h4>Land Cover</h4>')) legend.innerHTML = '<h4>Legend</h4>' + legend.innerHTML;
-            legend.innerHTML += `<div class="legend-item"><i style="border:none; border-bottom: 3px dashed yellow; background:none; height:10px; margin-top:5px;"></i><span>Marathon Route</span></div>`;
         } catch (error) { console.error(error); }
     }
 
@@ -416,7 +385,6 @@
     // REPROJECTION UTILITY
     function processGeoJSON(geojson, heightOffset = 0) {
         let cloned = JSON.parse(JSON.stringify(geojson));
-        // Simple heuristic: if x coordinate > 180, assume BNG
         let isBNG = false;
         try {
             if (getFirstCoordinate(cloned.features[0].geometry)[0] > 180) isBNG = true;
@@ -425,7 +393,6 @@
         const transformFn = (coords) => {
             if (isBNG) {
                 const wgs = proj4('EPSG:27700', 'EPSG:4326', coords);
-                // Return [lon, lat, height]
                 return [wgs[0], wgs[1], heightOffset];
             } else {
                 return [coords[0], coords[1], heightOffset];
@@ -466,10 +433,6 @@
         if(dsMask) dsMask.show = isTimeMachineActive;
 
         viewer.scene.requestRender();
-    }
-
-    function toggleLegend(checked) {
-        document.getElementById('legendPanel').style.display = (checked && currentSbiData) ? 'block' : 'none';
     }
 
     // Hover Handler
