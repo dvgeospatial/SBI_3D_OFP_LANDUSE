@@ -19,6 +19,41 @@
       background: #dcdcdc; font-family: sans-serif; 
     }
 
+    /* --- LOADING OVERLAY (NEW) --- */
+    #loadingOverlay {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: white;
+      z-index: 9999; /* Sit on top of everything */
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.5s ease-out;
+    }
+
+    .spinner {
+      border: 8px solid #f3f3f3; 
+      border-top: 8px solid #3498db; 
+      border-radius: 50%;
+      width: 50px; height: 50px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 20px;
+    }
+
+    .loading-text {
+      font-size: 18px;
+      color: #555;
+      font-weight: bold;
+      letter-spacing: 1px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
     /* --- POPUP TOOLTIP STYLES --- */
     #hoverPopup {
       display: none;
@@ -68,13 +103,15 @@
         font-weight: bold;
         color: #000;
     }
-
-    #loadingIndicator { 
-        font-size: 11px; color: #666; margin-top: 5px; display: none; font-style: italic; 
-    }
   </style>
 </head>
 <body>
+
+  <!-- LOADING OVERLAY -->
+  <div id="loadingOverlay">
+    <div class="spinner"></div>
+    <div class="loading-text" id="loadingText">Data Loading...</div>
+  </div>
 
   <!-- POPUP CONTAINER -->
   <div id="hoverPopup"></div>
@@ -85,10 +122,8 @@
         <input type="checkbox" id="chkTimeMachine" onchange="toggleTimeMachine(this.checked)">
         <label for="chkTimeMachine">Time Machine</label>
     </div>
-    <div id="loadingIndicator">Initializing...</div>
   </div>
 
-  <!-- LEGEND REMOVED -->
   <div id="cesiumContainer"></div>
 
   <script>
@@ -136,9 +171,8 @@
     // 3. VIEWER INITIALIZATION
     // =========================================================
     
-    // *** FIX 1: Set Default View Rectangle BEFORE creating viewer ***
-    // Coordinates approx around Massingham/Norfolk based on your data
-    Cesium.Camera.DEFAULT_VIEW_RECTANGLE = Cesium.Rectangle.fromDegrees(0.1, 52.3, 1.8, 53.1);
+    // Fallback View Rectangle (still good practice, though user won't see it due to overlay)
+    Cesium.Camera.DEFAULT_VIEW_RECTANGLE = Cesium.Rectangle.fromDegrees(0.61, 52.76, 0.64, 52.81);
 
     const viewer = new Cesium.Viewer('cesiumContainer', {
       imageryProvider: false, 
@@ -172,35 +206,39 @@
     // 4. MAIN DATA LOADING
     // =========================================================
     async function initData() {
-      const loader = document.getElementById('loadingIndicator');
-      loader.style.display = 'block';
+      // The Overlay is already visible via CSS.
+      // We do NOT hide it until the end of this function.
       
       try {
-        loader.innerText = "Loading annotations...";
         await loadPopupLayer(popupGeoJSON);
 
-        loader.innerText = "Loading landcovers...";
         const landcoversResponse = await fetch(URLS.LANDCOVERS);
         const landcoversData = await landcoversResponse.json();
         await loadSbiData(landcoversData);
 
-        loader.innerText = "Loading vegetation...";
         const vegResponse = await fetch(URLS.VEGETATION);
         const vegData = await vegResponse.json();
         await loadCustomData(vegData);
 
-        loader.innerText = "Loading mask...";
         await loadMaskLayer();
-
-        loader.innerText = "Loading route...";
         await loadMarathonRoute();
 
-        loader.innerText = "Ready.";
-        setTimeout(() => { loader.style.display = 'none'; }, 1000);
+        // All data loaded. Now snap the camera instantly.
+        if (dsRPA) {
+            await viewer.flyTo(dsRPA, { duration: 0 });
+        }
+        
+        // Give Cesium a fraction of a second to render the frame, then lift the curtain
+        setTimeout(() => { 
+            const overlay = document.getElementById('loadingOverlay');
+            overlay.style.opacity = '0'; // Fade out effect
+            setTimeout(() => { overlay.style.display = 'none'; }, 500); // Remove from DOM after fade
+        }, 500);
 
       } catch (err) {
         console.error("Load Error:", err);
-        loader.innerText = "Error loading data.";
+        document.getElementById('loadingText').innerText = "Error loading data. Please refresh.";
+        // We leave the overlay up so they don't see a broken map
       }
     }
 
@@ -295,14 +333,10 @@
       }
       viewer.dataSources.add(dsOutlines);
       
-      // *** FIX 2: INSTANT FLYTO & HOME BUTTON OVERRIDE ***
-      // flyTo with duration 0 prevents the camera animation and just "snaps" to the data
-      viewer.flyTo(dsRPA, { duration: 0 });
-      
-      // Override Home Button behavior
+      // Override Home Button
       viewer.homeButton.viewModel.command.beforeExecute.addEventListener(function(e) {
           e.cancel = true;
-          viewer.flyTo(dsRPA, { duration: 2.0 }); // Smooth fly back to data on click
+          viewer.flyTo(dsRPA, { duration: 2.0 }); 
       });
     }
 
@@ -382,7 +416,6 @@
     // 5. HELPER FUNCTIONS
     // =========================================================
     
-    // REPROJECTION UTILITY
     function processGeoJSON(geojson, heightOffset = 0) {
         let cloned = JSON.parse(JSON.stringify(geojson));
         let isBNG = false;
