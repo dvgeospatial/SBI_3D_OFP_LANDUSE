@@ -136,7 +136,8 @@
         VEGETATION: 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FMASSINGHAM_FARM_PARTNERSHIP%2Fveg_on_parcels_that_intersect_route_4326.geojson?alt=media&token=f47ace15-22b0-4c95-860d-6563a2781913',
         ROUTE: 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FhedgerowMarathonSimpleLine_EPSG_3587.geojson?alt=media&token=3ece0637-a19d-4837-acaf-779f955be40e',
         HISTORIC_MAP: 'https://mapseries-tilesets.s3.amazonaws.com/os/six-inch-norfolk/{z}/{x}/{y}.png',
-        MASK: 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FMASSINGHAM_FARM_PARTNERSHIP%2FMASK_OS_SIX_INCH.geojson?alt=media&token=ed3561b3-17af-405f-95f3-3c5fc271f20a'
+        MASK: 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FMASSINGHAM_FARM_PARTNERSHIP%2FMASK_OS_SIX_INCH.geojson?alt=media&token=ed3561b3-17af-405f-95f3-3c5fc271f20a',
+        POI_WOODLAND: 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_MARATHON%2FMASSINGHAM_FARM_PARTNERSHIP%2FPOI_WOODLAND.geojson?alt=media&token=226f7078-67fa-4e40-80bc-02fc0f638bca'
     };
 
     const landCoverColors = {
@@ -150,21 +151,10 @@
 
     proj4.defs("EPSG:27700", "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs");
 
-    const popupGeoJSON = {
-      "type": "FeatureCollection",
-      "features": [
-        { "type": "Feature", "properties": { "description": "New Belt at the starte of the route. present as mixed (conifer and deciduous) woodland on the 1884 first edition OS six inch." }, "geometry": { "type": "Polygon", "coordinates": [[[0.618281,52.770201],[0.618743,52.769857],[0.62636,52.773531],[0.628871,52.774414],[0.628409,52.774673],[0.625191,52.773486],[0.619462,52.770682],[0.618281,52.770201]]] } },
-        { "type": "Feature", "properties": { "description": "the plantation just north of new belt first appears on the 1952 OS six inch." }, "geometry": { "type": "Polygon", "coordinates": [[[0.618904,52.774174],[0.618753,52.773356],[0.624654,52.77346],[0.624397,52.774278],[0.618904,52.774174]]] } },
-        { "type": "Feature", "properties": { "description": "planted in the 1980s" }, "geometry": { "type": "Polygon", "coordinates": [[[0.622895,52.781598],[0.623989,52.781611],[0.624611,52.778263],[0.623474,52.778172],[0.622895,52.781598]]] } },
-        { "type": "Feature", "properties": { "description": "The triangular 'awkward corner' infill was planted around a marl pit in the early 2000's" }, "geometry": { "type": "Polygon", "coordinates": [[[0.622637,52.787931],[0.624011,52.788554],[0.624547,52.787892],[0.623453,52.787841],[0.622637,52.787931]]] } },
-        { "type": "Feature", "properties": { "description": "The irregular shaped woodland to the east of the route at the north end of the estate is an old gravel pit that dates from the early 20th century - the google earth air photos indicate this area has been managed for wildlife since the early 2000s" }, "geometry": { "type": "Polygon", "coordinates": [[[0.626671,52.796521],[0.629117,52.796301],[0.63107,52.796314],[0.630791,52.795717],[0.63122,52.794549],[0.634611,52.794108],[0.634933,52.793265],[0.635619,52.792771],[0.634096,52.792668],[0.63328,52.793368],[0.63195,52.793446],[0.63077,52.793161],[0.628345,52.794004],[0.628967,52.79429],[0.628238,52.795587],[0.628002,52.795924],[0.626671,52.796521]]] } }
-      ]
-    };
-
     // =========================================================
     // 2. GLOBAL STATE
     // =========================================================
-    let dsRPA, dsOutlines, dsCustom, dsMarathon, dsPopups, dsMask, layer1880s, currentSbiData;
+    let dsRPA, dsOutlines, dsCustom, dsMarathon, dsPOIWoodland, dsMask, layer1880s, currentSbiData;
     let isTimeMachineActive = false;
 
     // =========================================================
@@ -210,7 +200,7 @@
       // We do NOT hide it until the end of this function.
       
       try {
-        await loadPopupLayer(popupGeoJSON);
+        await loadPOIWoodland();
 
         const landcoversResponse = await fetch(URLS.LANDCOVERS);
         const landcoversData = await landcoversResponse.json();
@@ -242,49 +232,56 @@
       }
     }
 
-    async function loadPopupLayer(geojsonData) {
-        const processedData = processGeoJSON(geojsonData, 0); 
-        dsPopups = await Cesium.GeoJsonDataSource.load(processedData, {
-            stroke: Cesium.Color.TRANSPARENT,
-            fill: Cesium.Color.TRANSPARENT,
-            clampToGround: false
-        });
+    async function loadPOIWoodland() {
+        try {
+            const response = await fetch(URLS.POI_WOODLAND);
+            const poiData = await response.json();
+            const processedData = processGeoJSON(poiData, 0);
+            
+            dsPOIWoodland = await Cesium.GeoJsonDataSource.load(processedData, {
+                clampToGround: false
+            });
 
-        const canvas = document.createElement('canvas');
-        canvas.width = 64; canvas.height = 64;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#4facfe'; ctx.beginPath(); ctx.arc(32, 32, 28, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = 'white'; ctx.lineWidth = 3; ctx.stroke();
-        ctx.fillStyle = 'white'; ctx.font = 'bold 40px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('i', 32, 34);
+            // Create blue 'i' icon canvas
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#4facfe'; 
+            ctx.beginPath(); 
+            ctx.arc(32, 32, 28, 0, Math.PI * 2); 
+            ctx.fill();
+            ctx.strokeStyle = 'white'; 
+            ctx.lineWidth = 3; 
+            ctx.stroke();
+            ctx.fillStyle = 'white'; 
+            ctx.font = 'bold 40px Arial'; 
+            ctx.textAlign = 'center'; 
+            ctx.textBaseline = 'middle'; 
+            ctx.fillText('i', 32, 34);
 
-        const entities = dsPopups.entities.values;
-        entities.forEach((entity, index) => {
-            if (entity.polygon) entity.polygon.show = false; 
-
-            let centroid;
-            if (entity.polygon && entity.polygon.hierarchy) {
-                const positions = entity.polygon.hierarchy.getValue().positions;
-                centroid = Cesium.BoundingSphere.fromPoints(positions).center;
-            }
-
-            if (centroid) {
-                const pinEntity = viewer.entities.add({
-                    position: centroid,
-                    billboard: {
+            const entities = dsPOIWoodland.entities.values;
+            entities.forEach((entity, index) => {
+                if (entity.position) {
+                    entity.billboard = new Cesium.BillboardGraphics({
                         image: canvas,
                         scale: 0.5,
                         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-                        heightReference: Cesium.HeightReference.NONE
+                        heightReference: Cesium.HeightReference.NONE,
+                        disableDepthTestDistance: Number.POSITIVE_INFINITY
+                    });
+                    
+                    entity.isPopupTarget = true;
+                    entity.popupName = `Feature ${index + 1}`;
+                    if (entity.properties && entity.properties.description) {
+                        entity.popupDescription = entity.properties.description.getValue();
                     }
-                });
-                pinEntity.isPopupTarget = true;
-                pinEntity.popupName = `Feature ${index + 1}`;
-                if (entity.properties && entity.properties.description) {
-                    pinEntity.popupDescription = entity.properties.description.getValue();
                 }
-            }
-        });
-        await viewer.dataSources.add(dsPopups);
+            });
+            
+            await viewer.dataSources.add(dsPOIWoodland);
+        } catch (error) {
+            console.error("Error loading POI_WOODLAND:", error);
+        }
     }
 
     async function loadSbiData(data) {
@@ -433,7 +430,9 @@
         };
 
         const transformGeometry = (geometry) => {
-            if (geometry.type === 'Polygon' || geometry.type === 'MultiLineString') {
+            if (geometry.type === 'Point') {
+                geometry.coordinates = transformFn(geometry.coordinates);
+            } else if (geometry.type === 'Polygon' || geometry.type === 'MultiLineString') {
                 geometry.coordinates = geometry.coordinates.map(ring => ring.map(transformFn));
             } else if (geometry.type === 'MultiPolygon') {
                 geometry.coordinates = geometry.coordinates.map(poly => poly.map(ring => ring.map(transformFn)));
