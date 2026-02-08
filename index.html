@@ -31,11 +31,11 @@
     .btn-group button { width: 33%; margin-bottom: 0; font-size: 11px; }
 
     /* Specific styles for the new buttons */
-    #btnWoodland { background-color: #006400; border: 1px solid #004d00; }
-    #btnGrassland { background-color: #32CD32; border: 1px solid #228B22; color: #000; }
+    #btnWoodland { background-color: #228B22; border: 1px solid #004d00; }
+    #btnGrassland { background-color: #9ACD32; border: 1px solid #556B2F; color: #000; }
     #btnPond { background-color: #1E90FF; border: 1px solid #104E8B; }
 
-    #btnWoodland:hover { background-color: #008000; }
+    #btnWoodland:hover { background-color: #006400; }
     #btnGrassland:hover { background-color: #7CFC00; }
     #btnPond:hover { background-color: #63B8FF; }
 
@@ -133,6 +133,10 @@
     viewer.scene.postProcessStages.fxaa.enabled = true; 
     viewer.scene.globe.depthTestAgainstTerrain = false;
 
+    // --- CRITICAL FIX: Disable Double-Click Camera Zoom ---
+    // This prevents the camera from moving/tracking when the user double-clicks to finish the polygon
+    viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+
     // --- POPUP CONTROL LOGIC ---
     // If we are in drawing mode, we intercept selection changes and cancel them.
     viewer.selectedEntityChanged.addEventListener(function() {
@@ -154,17 +158,14 @@
     let activeShapePoints = [];
     let activeShape = null;
     let floatingPoint = null;
-    let drawMode = null; // 'polygon' or NULL (all tools are polygons now)
+    let drawMode = null; // 'polygon' or NULL
     let activeType = null; // 'woodland', 'grassland', 'pond'
 
     // --- Drawing Functions ---
 
     function startDrawing(type) {
-        // 1. Set mode
         drawMode = 'polygon';
         activeType = type;
-        
-        // 2. Immediately clear any current selection to close existing popups
         viewer.selectedEntity = undefined;
 
         activeShapePoints = [];
@@ -183,20 +184,17 @@
         // 1. LEFT CLICK (Add vertex)
         drawingHandler.setInputAction(function (event) {
             const earthPosition = viewer.scene.camera.pickEllipsoid(event.position, viewer.scene.globe.ellipsoid);
-            
             if (Cesium.defined(earthPosition)) {
                 if (activeShapePoints.length === 0) {
-                    // First click
                     activeShapePoints.push(earthPosition);
                     const dynamicPositions = new Cesium.CallbackProperty(function () {
                         return new Cesium.PolygonHierarchy(activeShapePoints);
                     }, false);
-                    
                     activeShape = drawDynamicShape(dynamicPositions);
                     floatingPoint = createPoint(earthPosition); 
                 }
                 activeShapePoints.push(earthPosition);
-                createPoint(earthPosition); // Visualize vertex
+                createPoint(earthPosition); 
             }
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
@@ -219,44 +217,60 @@
     }
 
     function createPoint(worldPosition) {
-        const point = dsDraw.entities.add({
+        // Points get the same color as the feature being drawn for consistency
+        const styles = getDrawStyles(activeType);
+        return dsDraw.entities.add({
             position: worldPosition,
             point: {
-                color: Cesium.Color.WHITE,
-                pixelSize: 5,
+                color: styles.outline, // Use outline color for vertices so they stand out
+                pixelSize: 6,
                 heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
             }
         });
-        return point;
     }
 
+    // Helper to get fill and specific darker outline for each type
     function getDrawStyles(type) {
-        if (type === 'woodland') return { color: Cesium.Color.DARKGREEN.withAlpha(0.7), outline: Cesium.Color.DARKGREEN };
-        if (type === 'grassland') return { color: Cesium.Color.LIGHTGREEN.withAlpha(0.7), outline: Cesium.Color.DARKGREEN };
-        if (type === 'pond') return { color: Cesium.Color.DODGERBLUE.withAlpha(0.7), outline: Cesium.Color.DARKBLUE };
+        if (type === 'woodland') {
+            return { 
+                color: Cesium.Color.FORESTGREEN.withAlpha(0.6), 
+                outline: Cesium.Color.DARKGREEN // Darker Green
+            };
+        }
+        if (type === 'grassland') {
+            return { 
+                color: Cesium.Color.LAWNGREEN.withAlpha(0.6), 
+                outline: Cesium.Color.OLIVEDRAB // Darker/Muddy Green
+            };
+        }
+        if (type === 'pond') {
+            return { 
+                color: Cesium.Color.DEEPSKYBLUE.withAlpha(0.6), 
+                outline: Cesium.Color.MIDNIGHTBLUE // Darker Blue
+            };
+        }
         return { color: Cesium.Color.GRAY, outline: Cesium.Color.BLACK };
     }
 
     function drawDynamicShape(positionData) {
         const styles = getDrawStyles(activeType);
         
-        // Create the polygon entity
-        const shape = dsDraw.entities.add({
+        return dsDraw.entities.add({
             polygon: {
                 hierarchy: positionData,
                 material: styles.color,
                 outline: true,
                 outlineColor: styles.outline,
-                outlineWidth: 2
+                outlineWidth: 3, // Visible width during drawing
+                // Ensure it draws on top of existing layers
+                heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
             }
         });
-        return shape;
     }
 
     function terminateShape() {
-        activeShapePoints.pop(); // Remove the floating mouse point
-        // Remove the extra point added by the double click event itself
-        activeShapePoints.pop(); 
+        activeShapePoints.pop(); // Remove floating point
+        activeShapePoints.pop(); // Remove double-click second point
 
         const styles = getDrawStyles(activeType);
         let extrudedHeight = undefined;
@@ -271,25 +285,23 @@
             description: `Created via Drawing Tool`,
             polygon: {
                 hierarchy: activeShapePoints,
-                material: styles.color.withAlpha(0.8), // Slightly less transparent when finished
+                material: styles.color.withAlpha(0.8), // Solidify slightly on finish
                 outline: true,
                 outlineColor: styles.outline, 
-                outlineWidth: 2,
-                extrudedHeight: extrudedHeight // This will be 20 for woodland, undefined for others
+                outlineWidth: 3,
+                extrudedHeight: extrudedHeight // 20m for woodland, undefined for others
             }
         });
 
-        // Clean up temporary helpers
+        // Cleanup
         dsDraw.entities.remove(activeShape);
         dsDraw.entities.remove(floatingPoint);
         const entities = dsDraw.entities.values;
         for (let i = entities.length - 1; i >= 0; i--) {
-            // Remove the temporary vertex points
             if (entities[i].point && !entities[i].description) {
                 dsDraw.entities.remove(entities[i]);
             }
         }
-
         resetDrawing();
     }
 
@@ -309,7 +321,6 @@
         dsDraw.entities.removeAll();
     }
 
-
     // --- Helper: Resample LineString to vertex every X meters ---
     function resampleLine(lineFeature, intervalMeters = 20) {
         const length = turf.length(lineFeature, {units: 'meters'});
@@ -320,19 +331,17 @@
             const pt = turf.along(lineFeature, step, {units: 'meters'});
             newCoords.push(pt.geometry.coordinates);
         }
-        // Always add the very end point
         const endPt = turf.along(lineFeature, length, {units: 'meters'});
         newCoords.push(endPt.geometry.coordinates);
-
         return turf.lineString(newCoords, lineFeature.properties);
     }
 
-    // --- Helper: Reproject BNG -> WGS84 + Add Height Buffer ---
+    // --- Helper: Reproject BNG -> WGS84 ---
     function reprojectGeoJSON(geojson) {
         let cloned = JSON.parse(JSON.stringify(geojson));
         const transform = (coords) => {
             const wgs = proj4('EPSG:27700', 'EPSG:4326', coords);
-            return [wgs[0], wgs[1], 2]; // 2 meters for outlines
+            return [wgs[0], wgs[1], 2]; 
         };
         const transformGeometry = (geometry) => {
             if (geometry.type === 'Polygon' || geometry.type === 'MultiLineString') {
@@ -362,7 +371,7 @@
         if(dsRPA) viewer.dataSources.remove(dsRPA);
         if(dsOutlines) viewer.dataSources.remove(dsOutlines);
         if(dsOFP) viewer.dataSources.remove(dsOFP);
-        dsOFP = null; // Reset reference
+        dsOFP = null; 
         
         legend.style.display = 'none';
         loader.style.display = 'block';
@@ -377,7 +386,7 @@
             if (!data.features || data.features.length === 0) throw new Error("No SBI Data found");
 
             const wgs84Data = reprojectGeoJSON(data);
-            currentSbiData = wgs84Data; // Store for Intersection checks
+            currentSbiData = wgs84Data; 
             
             // 1. Load Fills
             dsRPA = await Cesium.GeoJsonDataSource.load(wgs84Data, { clampToGround: false });
@@ -439,7 +448,6 @@
 
             // C. Trigger OFP
             if(document.getElementById('chkOFP').checked) {
-                // Pass the geometry for filtering using the Clustered approach
                 loadClusteredOFP(currentSbiData);
             } else {
                 loader.innerText = "Ready.";
@@ -457,16 +465,9 @@
         loader.innerText = "Analyzing Clusters...";
 
         try {
-            // 1. Convert polygons to centroids for clustering
-            const centroids = turf.featureCollection(
-                sbiGeoJSON.features.map(f => turf.centroid(f))
-            );
-
-            // 2. DBSCAN Clustering (3km threshold)
+            const centroids = turf.featureCollection(sbiGeoJSON.features.map(f => turf.centroid(f)));
             const maxDistKm = 0.5; 
             const clustered = turf.clustersDbscan(centroids, maxDistKm, { units: 'kilometers', minPoints: 1 });
-
-            // 3. Group Original Polygons by Cluster ID
             const clusters = {};
             clustered.features.forEach((centroid, index) => {
                 const clusterId = centroid.properties.cluster !== undefined ? centroid.properties.cluster : -1;
@@ -476,37 +477,22 @@
 
             const clusterIds = Object.keys(clusters);
             loader.innerText = `Detected ${clusterIds.length} parcel clusters. Fetching OFP...`;
-
-            // 4. Fetch data for EACH cluster independently
             const ofpUrl = "https://services1.arcgis.com/JZM7qJpmv7vJ0Hzx/arcgis/rest/services/OverlandFlowPathwaysForPublicALERTEngland_20240318/FeatureServer/0";
             
             const promises = clusterIds.map(id => {
                 const clusterFeatures = turf.featureCollection(clusters[id]);
-                const bbox = turf.bbox(clusterFeatures); // [minX, minY, maxX, maxY]
-                
-                // Construct standard Esri Envelope Query
+                const bbox = turf.bbox(clusterFeatures); 
                 const bboxStr = bbox.join(',');
                 const queryUrl = `${ofpUrl}/query?f=geojson&geometry=${bboxStr}&geometryType=esriGeometryEnvelope&spatialRel=esriSpatialRelIntersects&outFields=*&outSR=4326`;
-
-                return fetch(queryUrl)
-                    .then(r => r.json())
-                    .then(data => data.features || [])
-                    .catch(err => {
-                        console.warn(`Cluster ${id} failed`, err);
-                        return [];
-                    });
+                return fetch(queryUrl).then(r => r.json()).then(data => data.features || []).catch(err => []);
             });
 
-            // 5. Wait for all fetches
             const results = await Promise.all(promises);
-
-            // 6. Deduplicate Features
             let allFeatures = [];
             let seenIds = new Set();
-
             results.forEach(features => {
                 features.forEach(f => {
-                    const fid = f.properties.OBJECTID || f.id; // Ensure we have a unique ID
+                    const fid = f.properties.OBJECTID || f.id; 
                     if (!seenIds.has(fid)) {
                         seenIds.add(fid);
                         allFeatures.push(f);
@@ -519,8 +505,6 @@
                 return;
             }
 
-            // 7. Client-side Filter: Intersection Check
-            // (Even with tight bboxes, we still want to clip strictly to parcels or just check intersection)
             loader.innerText = `Filtering ${allFeatures.length} paths by intersection...`;
             await new Promise(r => setTimeout(r, 20));
 
@@ -538,40 +522,28 @@
             loader.innerText = `Generating Arrows for ${finalFeatures.length} paths...`;
             await new Promise(r => setTimeout(r, 20));
 
-            // 8. Generate 3D Arrows
             dsOFP = new Cesium.CustomDataSource('FlowArrows');
             let arrowCount = 0;
 
             for(let i=0; i<finalFeatures.length; i++) {
                 const f = finalFeatures[i];
                 const flowVal = f.properties.MaxFlowAcc || 0;
-                
-                // Determine style
                 let color, width;
-                if (flowVal >= 50000) { 
-                    color = Cesium.Color.RED; 
-                    width = 8.0; 
-                } else { 
-                    color = Cesium.Color.BLUE; 
-                    width = 6.0; 
-                }
+                if (flowVal >= 50000) { color = Cesium.Color.RED; width = 8.0; } 
+                else { color = Cesium.Color.BLUE; width = 6.0; }
                 
-                // Resample to get segments every ~40m for arrows
                 let geom = f;
                 if(f.geometry.type === 'LineString') {
                     geom = resampleLine(f, 40); 
                 }
-
                 const coords = geom.geometry.coordinates;
                 for(let j=0; j<coords.length - 1; j++) {
                     const start = coords[j];
                     const end = coords[j+1];
-                    
                     dsOFP.entities.add({
                         polyline: {
                             positions: Cesium.Cartesian3.fromDegreesArrayHeights([
-                                start[0], start[1], 4,  // Height 4m
-                                end[0], end[1], 4       // Height 4m
+                                start[0], start[1], 4, end[0], end[1], 4
                             ]),
                             width: width,
                             material: new Cesium.PolylineArrowMaterialProperty(color),
@@ -581,14 +553,8 @@
                     arrowCount++;
                 }
             }
-            
-            console.log(`Created ${arrowCount} arrow segments.`);
-            
-            if(document.getElementById('chkOFP').checked) {
-                viewer.dataSources.add(dsOFP);
-            }
+            if(document.getElementById('chkOFP').checked) viewer.dataSources.add(dsOFP);
             loader.innerText = "Ready.";
-
         } catch (e) {
             console.error(e);
             loader.innerText = "OFP Error: " + e.message;
