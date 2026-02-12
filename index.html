@@ -84,6 +84,11 @@
         <label for="chkOFP">Show Flow Arrows</label>
     </div>
 
+    <div class="layer-row">
+        <input type="checkbox" id="chkAwkwardCorners" checked onchange="toggleAwkwardCorners(this.checked)">
+        <label for="chkAwkwardCorners">Awkward Corners</label>
+    </div>
+
     <!-- Drawing Tools Section -->
     <label class="section-title">New Habitat Creation</label>
     
@@ -149,6 +154,7 @@
     let dsRPA = null;
     let dsOutlines = null;
     let dsOFP = null; 
+    let dsAwkwardCorners = null;
     let dsDraw = new Cesium.CustomDataSource('UserDrawings');
     viewer.dataSources.add(dsDraw);
     let currentSbiData = null; 
@@ -360,6 +366,68 @@
         return turf.rewind(cloned, {reverse: false, mutate: true});
     }
 
+    // --- Load Awkward Corners Layer ---
+    async function loadAwkwardCorners() {
+        const loader = document.getElementById('loadingIndicator');
+        try {
+            loader.innerText = "Loading Awkward Corners...";
+            const url = 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/users%2FAbE2j6m8F1aQ7e68C9dVBGPmhLS2%2Fstock_files%2FMucklton%20Farm%20awkward%20corners%20WGS1984.geojson?alt=media&token=0cdd33b5-fd1f-4c12-9388-b076e8b40a32';
+            
+            const response = await fetch(url);
+            if(!response.ok) throw new Error("Failed to load Awkward Corners");
+            const data = await response.json();
+            
+            dsAwkwardCorners = await Cesium.GeoJsonDataSource.load(data, { 
+                clampToGround: true,
+                stroke: Cesium.Color.DARKORANGE,
+                strokeWidth: 2
+            });
+            
+            // Style all entities in the datasource
+            const entities = dsAwkwardCorners.entities.values;
+            for(let i = 0; i < entities.length; i++) {
+                const entity = entities[i];
+                entity.name = 'Awkward Corner';
+                
+                if(entity.polyline) {
+                    entity.polyline.material = Cesium.Color.DARKORANGE;
+                    entity.polyline.width = 2;
+                }
+                if(entity.polygon) {
+                    entity.polygon.material = Cesium.Color.DARKORANGE.withAlpha(0.3);
+                    entity.polygon.outline = true;
+                    entity.polygon.outlineColor = Cesium.Color.DARKORANGE;
+                    entity.polygon.outlineWidth = 2;
+                }
+            }
+            
+            if(document.getElementById('chkAwkwardCorners').checked) {
+                viewer.dataSources.add(dsAwkwardCorners);
+            }
+            
+            loader.innerText = "Ready.";
+        } catch(e) {
+            console.error(e);
+            loader.innerText = "Error loading Awkward Corners: " + e.message;
+        }
+    }
+
+    function toggleAwkwardCorners(checked) {
+        if(checked) {
+            if(dsAwkwardCorners) {
+                if(!viewer.dataSources.contains(dsAwkwardCorners)) {
+                    viewer.dataSources.add(dsAwkwardCorners);
+                }
+            } else {
+                loadAwkwardCorners();
+            }
+        } else {
+            if(dsAwkwardCorners) {
+                viewer.dataSources.remove(dsAwkwardCorners);
+            }
+        }
+    }
+
     // --- Main Update Function ---
     async function runMapUpdate() {
         const sbi = document.getElementById('sbiInput').value.trim();
@@ -443,7 +511,8 @@
             });
             legend.innerHTML += `<hr><div style="font-weight:bold; font-size:11px; margin-bottom:5px;">Flow Pathways:</div>
             <div class="legend-item"><i style="background:red; width:10px; height:10px; clip-path: polygon(0 0, 100% 50%, 0 100%); margin-right:5px;"></i><span>High Flow (Arrows)</span></div>
-            <div class="legend-item"><i style="background:blue; width:10px; height:10px; clip-path: polygon(0 0, 100% 50%, 0 100%); margin-right:5px;"></i><span>Low Flow (Arrows)</span></div>`;
+            <div class="legend-item"><i style="background:blue; width:10px; height:10px; clip-path: polygon(0 0, 100% 50%, 0 100%); margin-right:5px;"></i><span>Low Flow (Arrows)</span></div>
+            <hr><div class="legend-item"><i style="background:darkorange; opacity:0.6;"></i><span>Awkward Corners</span></div>`;
             legend.style.display = 'block';
 
             // C. Trigger OFP
@@ -451,6 +520,11 @@
                 loadClusteredOFP(currentSbiData);
             } else {
                 loader.innerText = "Ready.";
+            }
+
+            // D. Load Awkward Corners
+            if(document.getElementById('chkAwkwardCorners').checked) {
+                loadAwkwardCorners();
             }
 
         } catch (e) {
