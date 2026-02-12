@@ -10,23 +10,23 @@
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.0/dist/proj4.js"></script>
   <!-- Turf.js for Geometry Processing -->
   <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
-  
+
   <style>
     body, html, #cesiumContainer { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; background: #dcdcdc; font-family: sans-serif; }
-    
+
     #controls {
       position: absolute; top: 10px; left: 10px; z-index: 100;
       background: rgba(255, 255, 255, 0.95); padding: 12px; border-radius: 4px;
       box-shadow: 0 1px 5px rgba(0,0,0,0.2); width: 220px;
     }
     input[type="text"] { padding: 5px; width: 100%; box-sizing: border-box; margin-bottom: 8px; border: 1px solid #ccc; }
-    
+
     button {
       padding: 8px; background-color: #333; color: white; border: none; 
       border-radius: 3px; cursor: pointer; width: 100%; font-weight: bold; margin-bottom: 8px;
     }
     button:hover { background-color: #555; }
-    
+
     .btn-group { display: flex; gap: 5px; margin-bottom: 8px; }
     .btn-group button { width: 33%; margin-bottom: 0; font-size: 11px; }
 
@@ -45,7 +45,7 @@
     #loadingIndicator { 
         font-size: 11px; color: #666; margin-top: 5px; display: none; font-style: italic; 
     }
-    
+
     .section-title { font-size:12px; font-weight:bold; color:#333; margin-top: 10px; display:block; border-top: 1px solid #ddd; padding-top: 8px; }
 
     #legendPanel {
@@ -61,7 +61,7 @@
       opacity: 0.8; border: 1px solid #999; flex-shrink: 0;
     }
     h4 { margin: 0 0 10px 0; font-size: 14px; border-bottom: 1px solid #ccc; padding-bottom: 5px; color: #333; }
-    
+
     /* Notification toast for drawing instructions */
     #toast {
         position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
@@ -78,7 +78,7 @@
     <label class="section-title" style="border:none; padding-top:0;">SBI Loader</label>
     <input type="text" id="sbiInput" value="106721928" placeholder="e.g. 106721928">
     <button onclick="runMapUpdate()">Load SBI Data</button>
-    
+
     <div class="layer-row">
         <input type="checkbox" id="chkOFP" checked onchange="toggleOFP(this.checked)">
         <label for="chkOFP">Show Flow Arrows</label>
@@ -89,9 +89,14 @@
         <label for="chkAwkwardCorners">Awkward Corners</label>
     </div>
 
+    <div class="layer-row">
+        <input type="checkbox" id="chkSatellite" onchange="toggleSatellite(this.checked)">
+        <label for="chkSatellite">Satellite (Mapbox)</label>
+    </div>
+
     <!-- Drawing Tools Section -->
     <label class="section-title">New Habitat Creation</label>
-    
+
     <div class="btn-group">
         <button id="btnWoodland" onclick="startDrawing('woodland')">Woodland</button>
         <button id="btnGrassland" onclick="startDrawing('grassland')">Grassland</button>
@@ -158,6 +163,7 @@
     let dsDraw = new Cesium.CustomDataSource('UserDrawings');
     viewer.dataSources.add(dsDraw);
     let currentSbiData = null; 
+    let satelliteLayer = null;
 
     // --- Drawing State ---
     let drawingHandler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
@@ -166,6 +172,73 @@
     let floatingPoint = null;
     let drawMode = null; // 'polygon' or NULL
     let activeType = null; // 'woodland', 'grassland', 'pond'
+
+    // --- Satellite Toggle Function ---
+    function toggleSatellite(checked) {
+        if(checked) {
+            // Add satellite layer
+            if(!satelliteLayer) {
+                satelliteLayer = viewer.imageryLayers.addImageryProvider(
+                    new Cesium.UrlTemplateImageryProvider({
+                        url: 'https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=pk.eyJ1Ijoid2lzZWZyb2dtYXBib3giLCJhIjoiY21sZ3R2a2JsMDI0MjNmb2cxbnNpZnVxbiJ9.iFfxLC6MrpS-9I9A2w1DtA',
+                        credit: '© Mapbox © OpenStreetMap'
+                    })
+                );
+            } else {
+                satelliteLayer.show = true;
+            }
+
+            // Update Land Cover layer to show outlines only (no fill)
+            if(dsRPA) {
+                const entities = dsRPA.entities.values;
+                for(let i = 0; i < entities.length; i++) {
+                    const entity = entities[i];
+                    if(entity.polygon) {
+                        const desc = entity.properties.DESCRIPTION ? entity.properties.DESCRIPTION.getValue() : 'default';
+
+                        // Make fill completely transparent, show outline
+                        entity.polygon.material = Cesium.Color.TRANSPARENT;
+                        entity.polygon.outline = true;
+                        entity.polygon.outlineColor = Cesium.Color.BLACK;
+                        entity.polygon.outlineWidth = 2;
+
+                        // Remove extrusion for woodland to show outline properly
+                        if (desc === 'Woodland' || desc === 'Natural Woodland') {
+                            entity.polygon.extrudedHeight = undefined;
+                        }
+                    }
+                }
+            }
+        } else {
+            // Hide satellite layer
+            if(satelliteLayer) {
+                satelliteLayer.show = false;
+            }
+
+            // Restore Land Cover layer to original fill styling
+            if(dsRPA) {
+                const entities = dsRPA.entities.values;
+                for(let i = 0; i < entities.length; i++) {
+                    const entity = entities[i];
+                    if(entity.polygon) {
+                        const desc = entity.properties.DESCRIPTION ? entity.properties.DESCRIPTION.getValue() : 'default';
+                        const colorCss = landCoverColors[desc] || landCoverColors['default'];
+                        const color = Cesium.Color.fromCssColorString(colorCss);
+
+                        entity.polygon.outline = false;
+
+                        if (desc === 'Woodland' || desc === 'Natural Woodland') {
+                            entity.polygon.extrudedHeight = 20;
+                            entity.polygon.material = color;
+                        } else {
+                            entity.polygon.extrudedHeight = undefined;
+                            entity.polygon.material = color.withAlpha(0.6);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // --- Drawing Functions ---
 
@@ -260,7 +333,7 @@
 
     function drawDynamicShape(positionData) {
         const styles = getDrawStyles(activeType);
-        
+
         return dsDraw.entities.add({
             polygon: {
                 hierarchy: positionData,
@@ -372,23 +445,23 @@
         try {
             loader.innerText = "Loading Awkward Corners...";
             const url = 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/users%2FAbE2j6m8F1aQ7e68C9dVBGPmhLS2%2Fstock_files%2FMucklton%20Farm%20awkward%20corners%20WGS1984.geojson?alt=media&token=0cdd33b5-fd1f-4c12-9388-b076e8b40a32';
-            
+
             const response = await fetch(url);
             if(!response.ok) throw new Error("Failed to load Awkward Corners");
             const data = await response.json();
-            
+
             dsAwkwardCorners = await Cesium.GeoJsonDataSource.load(data, { 
                 clampToGround: true,
                 stroke: Cesium.Color.DARKORANGE,
                 strokeWidth: 2
             });
-            
+
             // Style all entities in the datasource
             const entities = dsAwkwardCorners.entities.values;
             for(let i = 0; i < entities.length; i++) {
                 const entity = entities[i];
                 entity.name = 'Awkward Corner';
-                
+
                 if(entity.polyline) {
                     entity.polyline.material = Cesium.Color.DARKORANGE;
                     entity.polyline.width = 2;
@@ -400,11 +473,11 @@
                     entity.polygon.outlineWidth = 2;
                 }
             }
-            
+
             if(document.getElementById('chkAwkwardCorners').checked) {
                 viewer.dataSources.add(dsAwkwardCorners);
             }
-            
+
             loader.innerText = "Ready.";
         } catch(e) {
             console.error(e);
@@ -433,14 +506,14 @@
         const sbi = document.getElementById('sbiInput').value.trim();
         const loader = document.getElementById('loadingIndicator');
         const legend = document.getElementById('legendPanel');
-        
+
         if(!sbi) return alert("Enter SBI");
-        
+
         if(dsRPA) viewer.dataSources.remove(dsRPA);
         if(dsOutlines) viewer.dataSources.remove(dsOutlines);
         if(dsOFP) viewer.dataSources.remove(dsOFP);
         dsOFP = null; 
-        
+
         legend.style.display = 'none';
         loader.style.display = 'block';
         loader.innerText = "Fetching RPA Data...";
@@ -455,52 +528,67 @@
 
             const wgs84Data = reprojectGeoJSON(data);
             currentSbiData = wgs84Data; 
-            
+
             // 1. Load Fills
             dsRPA = await Cesium.GeoJsonDataSource.load(wgs84Data, { clampToGround: false });
             const entities = dsRPA.entities.values;
             const foundCategories = new Set();
+            const isSatelliteOn = document.getElementById('chkSatellite').checked;
+
             for (let i = 0; i < entities.length; i++) {
                 const entity = entities[i];
                 const desc = entity.properties.DESCRIPTION ? entity.properties.DESCRIPTION.getValue() : 'default';
                 foundCategories.add(desc);
                 const colorCss = landCoverColors[desc] || landCoverColors['default'];
                 const color = Cesium.Color.fromCssColorString(colorCss);
-                
+
                 if(entity.polygon) {
-                    entity.polygon.outline = false; 
-                    entity.polygon.height = 0;
-                    if (desc === 'Woodland' || desc === 'Natural Woodland') {
-                        entity.polygon.extrudedHeight = 20; 
-                        entity.polygon.material = color;    
+                    if(isSatelliteOn) {
+                        // Satellite mode: outline only
+                        entity.polygon.material = Cesium.Color.TRANSPARENT;
+                        entity.polygon.outline = true;
+                        entity.polygon.outlineColor = Cesium.Color.BLACK;
+                        entity.polygon.outlineWidth = 2;
+                        entity.polygon.extrudedHeight = undefined;
                     } else {
-                        entity.polygon.extrudedHeight = undefined; 
-                        entity.polygon.material = color.withAlpha(0.6); 
+                        // Normal mode: fills with colors
+                        entity.polygon.outline = false; 
+                        entity.polygon.height = 0;
+                        if (desc === 'Woodland' || desc === 'Natural Woodland') {
+                            entity.polygon.extrudedHeight = 20; 
+                            entity.polygon.material = color;    
+                        } else {
+                            entity.polygon.extrudedHeight = undefined; 
+                            entity.polygon.material = color.withAlpha(0.6); 
+                        }
                     }
                 }
             }
             viewer.dataSources.add(dsRPA);
 
-            // 2. Load Outlines
-            const outlinesGeoJSON = { type: "FeatureCollection", features: [] };
-            wgs84Data.features.forEach(f => {
-                if (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon') {
-                    const lines = turf.polygonToLine(f);
-                    if (lines.type === 'FeatureCollection') outlinesGeoJSON.features.push(...lines.features);
-                    else outlinesGeoJSON.features.push(lines);
-                }
-            });
+            // 2. Load Outlines (only if not in satellite mode)
+            if(!isSatelliteOn) {
+                const outlinesGeoJSON = { type: "FeatureCollection", features: [] };
+                wgs84Data.features.forEach(f => {
+                    if (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon') {
+                        const lines = turf.polygonToLine(f);
+                        if (lines.type === 'FeatureCollection') outlinesGeoJSON.features.push(...lines.features);
+                        else outlinesGeoJSON.features.push(lines);
+                    }
+                });
 
-            dsOutlines = await Cesium.GeoJsonDataSource.load(outlinesGeoJSON, { clampToGround: false });
-            const outlineEntities = dsOutlines.entities.values;
-            for(let i=0; i<outlineEntities.length; i++) {
-                const ent = outlineEntities[i];
-                if(ent.polyline) {
-                    ent.polyline.material = Cesium.Color.BLACK;
-                    ent.polyline.width = 1.0; 
+                dsOutlines = await Cesium.GeoJsonDataSource.load(outlinesGeoJSON, { clampToGround: false });
+                const outlineEntities = dsOutlines.entities.values;
+                for(let i=0; i<outlineEntities.length; i++) {
+                    const ent = outlineEntities[i];
+                    if(ent.polyline) {
+                        ent.polyline.material = Cesium.Color.BLACK;
+                        ent.polyline.width = 1.0; 
+                    }
                 }
+                viewer.dataSources.add(dsOutlines);
             }
-            viewer.dataSources.add(dsOutlines);
+
             viewer.zoomTo(dsRPA);
 
             // B. Build Legend
@@ -552,7 +640,7 @@
             const clusterIds = Object.keys(clusters);
             loader.innerText = `Detected ${clusterIds.length} parcel clusters. Fetching OFP...`;
             const ofpUrl = "https://services1.arcgis.com/JZM7qJpmv7vJ0Hzx/arcgis/rest/services/OverlandFlowPathwaysForPublicALERTEngland_20240318/FeatureServer/0";
-            
+
             const promises = clusterIds.map(id => {
                 const clusterFeatures = turf.featureCollection(clusters[id]);
                 const bbox = turf.bbox(clusterFeatures); 
@@ -605,7 +693,7 @@
                 let color, width;
                 if (flowVal >= 50000) { color = Cesium.Color.RED; width = 8.0; } 
                 else { color = Cesium.Color.BLUE; width = 6.0; }
-                
+
                 let geom = f;
                 if(f.geometry.type === 'LineString') {
                     geom = resampleLine(f, 40); 
