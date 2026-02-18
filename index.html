@@ -14,59 +14,112 @@
   <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
 
   <style>
-    body { margin: 0; padding: 0; font-family: sans-serif; }
+    body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
     #map { position: absolute; top: 0; bottom: 0; width: 100%; }
 
-    /* UI Controls Panel */
+    /* UI Controls Panel (Left) */
     #controls {
       position: absolute; top: 10px; left: 10px; z-index: 100;
-      background: rgba(255, 255, 255, 0.95); padding: 12px; border-radius: 4px;
-      box-shadow: 0 1px 5px rgba(0,0,0,0.2); width: 240px;
+      background: rgba(255, 255, 255, 0.95); padding: 16px; border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 240px;
+      backdrop-filter: blur(4px);
     }
-    .section-title { font-size:12px; font-weight:bold; color:#333; margin-top: 10px; display:block; border-top: 1px solid #ddd; padding-top: 8px; }
+    .section-title { font-size:12px; font-weight:700; color:#444; margin-top: 12px; display:block; border-top: 1px solid #eee; padding-top: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
     
-    input[type="text"] { padding: 5px; width: 100%; box-sizing: border-box; margin-bottom: 8px; border: 1px solid #ccc; }
-    button {
-      padding: 8px; background-color: #333; color: white; border: none; 
-      border-radius: 3px; cursor: pointer; width: 100%; font-weight: bold; margin-bottom: 8px;
+    input[type="text"] { padding: 8px; width: 100%; box-sizing: border-box; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
+    
+    button.action-btn {
+      padding: 10px; background-color: #333; color: white; border: none; 
+      border-radius: 4px; cursor: pointer; width: 100%; font-weight: 600; margin-bottom: 8px;
+      transition: background 0.2s;
     }
-    button:hover { background-color: #555; }
+    button.action-btn:hover { background-color: #555; }
 
-    .layer-row { display: flex; align-items: center; font-size: 13px; cursor: pointer; margin-bottom: 5px; color: #333; }
-    .layer-row input { margin-right: 8px; cursor: pointer; }
+    .layer-row { display: flex; align-items: center; font-size: 14px; cursor: pointer; margin-bottom: 8px; color: #333; }
+    .layer-row input { margin-right: 10px; cursor: pointer; accent-color: #333; }
 
     #loadingIndicator { 
-        font-size: 11px; color: #666; margin-top: 5px; display: none; font-style: italic; 
+        font-size: 12px; color: #666; margin-top: 8px; display: none; font-style: italic; 
     }
 
     /* Terrain Slider */
-    .slider-container { margin-top: 10px; border-top: 1px solid #ddd; padding-top:10px; }
-    .slider-container label { display: block; font-size: 12px; margin-bottom: 4px; }
-    input[type=range] { width: 100%; }
+    .slider-container { margin-top: 12px; border-top: 1px solid #eee; padding-top:12px; }
+    .slider-container label { display: block; font-size: 12px; margin-bottom: 6px; font-weight: 600; }
+    input[type=range] { width: 100%; cursor: pointer; }
 
-    /* Legend */
-    #legendPanel {
-      position: absolute; bottom: 30px; right: 10px;
-      background: rgba(255, 255, 255, 0.95); padding: 10px;
-      border-radius: 5px; z-index: 100; max-height: 400px;
-      overflow-y: auto; width: 200px; display: none;
-      box-shadow: 0 1px 5px rgba(0,0,0,0.2); font-size: 12px;
+    /* Custom Navigation Panel (Top Right) */
+    #nav-controls {
+        position: absolute; top: 10px; right: 50px; /* Left of the default mapbox controls */
+        z-index: 100;
+        display: flex; flex-direction: column; gap: 8px;
+        align-items: flex-end;
     }
-    .legend-item { display: flex; align-items: center; margin-bottom: 4px; }
-    .legend-color { width: 16px; height: 16px; margin-right: 8px; border: 1px solid #ccc; opacity: 0.8; }
-  </style>
+
+    .nav-instruction-box {
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 8px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 500;
+        pointer-events: none; /* Let clicks pass through if needed, though mostly visual */
+        white-space: nowrap;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        display: flex; align-items: center; gap: 6px;
+    }
+    .key-hint {
+        background: rgba(255,255,255,0.2);
+        padding: 2px 6px; border-radius: 3px;
+        font-family: monospace; font-weight: 700;
+    }
+
+    .custom-nav-btn {
+        background: white;
+        border: none;
+        width: 30px; height: 30px;
+        border-radius: 4px;
+        box-shadow: 0 0 0 2px rgba(0,0,0,0.1);
+        cursor: pointer;
+        display: flex; justify-content: center; align-items: center;
+        font-size: 16px; color: #333;
+        transition: background 0.2s;
+    }
+    .custom-nav-btn:hover { background: #f0f0f0; }
+    .custom-nav-btn svg { width: 18px; height: 18px; fill: currentColor; }
+
+</style>
 </head>
 
 <body>
 
 <div id="map"></div>
 
+<!-- Custom Navigation Help & Buttons -->
+<div id="nav-controls">
+    <div class="nav-instruction-box">
+        <span>Hold <span class="key-hint">Ctrl</span> + Drag to Rotate</span>
+    </div>
+    
+    <!-- Custom Buttons Wrapper -->
+    <div style="display:flex; gap:6px;">
+        <button class="custom-nav-btn" onclick="rotateCamera()" title="Rotate Camera 45°">
+            <!-- Rotate Icon -->
+            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
+        </button>
+        <button class="custom-nav-btn" onclick="resetView()" title="Pan to Home (Norwich)">
+            <!-- Home Icon -->
+            <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+        </button>
+    </div>
+</div>
+
 <div id="controls">
-    <div style="font-weight:bold; font-size:14px; margin-bottom:10px;">Norwich 3D Viewer</div>
+    <div style="font-weight:800; font-size:16px; margin-bottom:4px;">Norwich 3D Viewer</div>
+    <div style="font-size:11px; color:#666; margin-bottom:12px;">Mapbox GL JS + 3D Terrain</div>
     
     <label class="section-title" style="border:none; padding-top:0;">SBI Loader</label>
     <input type="text" id="sbiInput" value="106721928" placeholder="e.g. 106721928">
-    <button onclick="runDataLoad()">Load SBI Data</button>
+    <button class="action-btn" onclick="runDataLoad()">Load SBI Data</button>
 
     <div class="layer-row">
         <input type="checkbox" id="chkLayers" checked onchange="toggleLayer('sbi-fill', this.checked); toggleLayer('sbi-line', this.checked)">
@@ -90,8 +143,6 @@
 
     <div id="loadingIndicator">Ready.</div>
 </div>
-
-<div id="legendPanel"></div>
 
 <script>
     // 1. SETUP & CONFIGURATION
@@ -120,10 +171,14 @@
         center: NORWICH_CENTER,
         zoom: 13,
         pitch: 60,
-        bearing: 0
+        bearing: 0,
+        projection: 'globe' // Enable Globe projection for better 3D feel at low zooms
     });
 
-    map.addControl(new mapboxgl.NavigationControl());
+    // Add standard Navigation Control (Zoom + Compass)
+    map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
+    // Add Scale Control
+    map.addControl(new mapboxgl.ScaleControl(), 'bottom-left');
 
     // 3. MAP LOAD EVENT
     map.on('load', () => {
@@ -136,6 +191,17 @@
         });
         
         map.setTerrain({ 'source': 'mapbox-dem', 'exaggeration': 2.0 });
+
+        // A2. Add Sky Layer for better 3D atmosphere
+        map.addLayer({
+            'id': 'sky',
+            'type': 'sky',
+            'paint': {
+                'sky-type': 'atmosphere',
+                'sky-atmosphere-sun': [0.0, 0.0],
+                'sky-atmosphere-sun-intensity': 15
+            }
+        });
 
         // B. Add Empty Sources for our Data Layers
         map.addSource('sbi-data', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
@@ -167,8 +233,6 @@
         });
 
         // 3. Flow Pathways (Arrows/Lines)
-        // Note: Mapbox doesn't support "arrows" easily on lines without complex icon logic.
-        // We will use a thick colored line to represent flow.
         map.addLayer({
             'id': 'ofp-arrows',
             'type': 'line',
@@ -178,7 +242,7 @@
                 'line-cap': 'round'
             },
             'paint': {
-                'line-color': ['case', ['>=', ['get', 'flow'], 50000], '#FF0000', '#0000FF'], // Red for High, Blue for Low
+                'line-color': ['case', ['>=', ['get', 'flow'], 50000], '#FF0000', '#0000FF'],
                 'line-width': ['case', ['>=', ['get', 'flow'], 50000], 4, 2]
             }
         });
@@ -213,8 +277,6 @@
     async function runDataLoad() {
         const sbi = document.getElementById('sbiInput').value.trim();
         const loader = document.getElementById('loadingIndicator');
-        const legend = document.getElementById('legendPanel');
-        legend.style.display = 'none';
 
         if(!sbi) return alert("Please enter an SBI number.");
 
@@ -235,9 +297,7 @@
 
             // B. Process & Reproject RPA Data
             const processedFeatures = data.features.map(f => {
-                // Reproject Geometry
                 const reprojected = reprojectGeoJSONFeature(f);
-                // Assign Color Property for styling
                 const desc = f.properties.DESCRIPTION || 'default';
                 reprojected.properties.color = landCoverColors[desc] || landCoverColors['default'];
                 reprojected.properties.description = desc;
@@ -247,15 +307,11 @@
             const sbiGeoJSON = { type: 'FeatureCollection', features: processedFeatures };
             currentSbiGeoJSON = sbiGeoJSON;
             
-            // Update Map Source
             map.getSource('sbi-data').setData(sbiGeoJSON);
 
             // Fit Bounds
             const bbox = turf.bbox(sbiGeoJSON);
             map.fitBounds(bbox, { padding: 50, pitch: 60 });
-
-            // Build Legend
-            buildLegend(processedFeatures);
 
             // C. Load Flow Pathways
             if(document.getElementById('chkOFP').checked) {
@@ -280,7 +336,7 @@
         loader.innerText = "Loading Flow Pathways...";
 
         try {
-            // 1. Cluster centroids to minimize API calls (DBSCAN)
+            // DBSCAN Clustering for optimization
             const centroids = turf.featureCollection(sbiGeoJSON.features.map(f => turf.centroid(f)));
             const clustered = turf.clustersDbscan(centroids, 0.5, { units: 'kilometers', minPoints: 1 });
             
@@ -291,7 +347,6 @@
                 clusters[cid].push(sbiGeoJSON.features[i]);
             });
 
-            // 2. Query ArcGIS FeatureServer for each cluster bbox
             const ofpUrl = "https://services1.arcgis.com/JZM7qJpmv7vJ0Hzx/arcgis/rest/services/OverlandFlowPathwaysForPublicALERTEngland_20240318/FeatureServer/0";
             const clusterIds = Object.keys(clusters);
             
@@ -304,7 +359,6 @@
 
             const results = await Promise.all(promises);
             
-            // 3. Deduplicate results
             const allFeatures = [];
             const seen = new Set();
             results.flat().forEach(f => {
@@ -315,10 +369,7 @@
                 }
             });
 
-            // 4. Client-side Intersection Filter
-            // Only keep lines that actually touch/cross the SBI polygons
             const filtered = allFeatures.filter(ofp => {
-                // Enrich properties for styling
                 ofp.properties.flow = ofp.properties.MaxFlowAcc || 0;
                 return sbiGeoJSON.features.some(sbi => turf.booleanIntersects(ofp, sbi));
             });
@@ -360,24 +411,6 @@
         return turf.rewind(f, {reverse: false, mutate: true});
     }
 
-    function buildLegend(features) {
-        const legend = document.getElementById('legendPanel');
-        const categories = new Set(features.map(f => f.properties.description));
-        
-        let html = '<strong>Land Cover</strong><br>';
-        Array.from(categories).sort().forEach(cat => {
-            const color = landCoverColors[cat] || landCoverColors['default'];
-            html += `<div class="legend-item"><div class="legend-color" style="background:${color}"></div>${cat}</div>`;
-        });
-        
-        html += '<hr><strong>Flow Pathways</strong><br>';
-        html += `<div class="legend-item"><div class="legend-color" style="background:red; height:4px; margin-top:6px;"></div>High Flow (>50k)</div>`;
-        html += `<div class="legend-item"><div class="legend-color" style="background:blue; height:2px; margin-top:7px;"></div>Low Flow</div>`;
-        
-        legend.innerHTML = html;
-        legend.style.display = 'block';
-    }
-
     function toggleLayer(layerId, visible) {
         if(map.getLayer(layerId)) {
             map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
@@ -401,6 +434,27 @@
             .setHTML(`<strong>${props.description}</strong><br>Area: ${props.Hectares || '?'} ha`)
             .addTo(map);
     });
+
+    // Custom Navigation Functions
+    function rotateCamera() {
+        // Rotate 45 degrees
+        map.easeTo({
+            bearing: map.getBearing() + 45,
+            duration: 1000,
+            easing: (t) => t
+        });
+    }
+
+    function resetView() {
+        // Pan back to Norwich center with default pitch/zoom
+        map.flyTo({
+            center: NORWICH_CENTER,
+            zoom: 13,
+            pitch: 0,
+            bearing: 0,
+            speed: 1.2
+        });
+    }
 
 </script>
 </body>
