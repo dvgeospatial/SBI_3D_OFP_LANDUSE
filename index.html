@@ -1,43 +1,36 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="utf-8">
-  <title>SBI: 3D Woodland, Flow Arrows & Drawing Tools</title>
-  <!-- CesiumJS -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.110.0/Cesium.js"></script>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.110.0/Widgets/widgets.css" rel="stylesheet">
-  <!-- Proj4 for Coordinate Transformation -->
+  <meta charset="utf-8" />
+  <title>Norwich SBI: 3D Terrain & Data Layers</title>
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  
+  <!-- Mapbox GL JS -->
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.css" rel="stylesheet" />
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.js"></script>
+  
+  <!-- Proj4 & Turf.js for Coordinate Conversion & Analysis -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.0/dist/proj4.js"></script>
-  <!-- Turf.js for Geometry Processing -->
   <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
 
   <style>
-    body, html, #cesiumContainer { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; background: #dcdcdc; font-family: sans-serif; }
+    body { margin: 0; padding: 0; font-family: sans-serif; }
+    #map { position: absolute; top: 0; bottom: 0; width: 100%; }
 
+    /* UI Controls Panel */
     #controls {
       position: absolute; top: 10px; left: 10px; z-index: 100;
       background: rgba(255, 255, 255, 0.95); padding: 12px; border-radius: 4px;
-      box-shadow: 0 1px 5px rgba(0,0,0,0.2); width: 220px;
+      box-shadow: 0 1px 5px rgba(0,0,0,0.2); width: 240px;
     }
+    .section-title { font-size:12px; font-weight:bold; color:#333; margin-top: 10px; display:block; border-top: 1px solid #ddd; padding-top: 8px; }
+    
     input[type="text"] { padding: 5px; width: 100%; box-sizing: border-box; margin-bottom: 8px; border: 1px solid #ccc; }
-
     button {
       padding: 8px; background-color: #333; color: white; border: none; 
       border-radius: 3px; cursor: pointer; width: 100%; font-weight: bold; margin-bottom: 8px;
     }
     button:hover { background-color: #555; }
-
-    .btn-group { display: flex; gap: 5px; margin-bottom: 8px; }
-    .btn-group button { width: 33%; margin-bottom: 0; font-size: 11px; }
-
-    /* Specific styles for the new buttons */
-    #btnWoodland { background-color: #228B22; border: 1px solid #004d00; }
-    #btnGrassland { background-color: #9ACD32; border: 1px solid #556B2F; color: #000; }
-    #btnPond { background-color: #1E90FF; border: 1px solid #104E8B; }
-
-    #btnWoodland:hover { background-color: #006400; }
-    #btnGrassland:hover { background-color: #7CFC00; }
-    #btnPond:hover { background-color: #63B8FF; }
 
     .layer-row { display: flex; align-items: center; font-size: 13px; cursor: pointer; margin-bottom: 5px; color: #333; }
     .layer-row input { margin-right: 8px; cursor: pointer; }
@@ -46,75 +39,68 @@
         font-size: 11px; color: #666; margin-top: 5px; display: none; font-style: italic; 
     }
 
-    .section-title { font-size:12px; font-weight:bold; color:#333; margin-top: 10px; display:block; border-top: 1px solid #ddd; padding-top: 8px; }
+    /* Terrain Slider */
+    .slider-container { margin-top: 10px; border-top: 1px solid #ddd; padding-top:10px; }
+    .slider-container label { display: block; font-size: 12px; margin-bottom: 4px; }
+    input[type=range] { width: 100%; }
 
+    /* Legend */
     #legendPanel {
       position: absolute; bottom: 30px; right: 10px;
       background: rgba(255, 255, 255, 0.95); padding: 10px;
       border-radius: 5px; z-index: 100; max-height: 400px;
-      overflow-y: auto; width: 220px; display: none;
-      box-shadow: 0 1px 5px rgba(0,0,0,0.2);
+      overflow-y: auto; width: 200px; display: none;
+      box-shadow: 0 1px 5px rgba(0,0,0,0.2); font-size: 12px;
     }
-    .legend-item { display: flex; align-items: center; margin-bottom: 4px; font-size: 12px; color: #333; }
-    .legend-item i {
-      width: 18px; height: 18px; float: left; margin-right: 8px;
-      opacity: 0.8; border: 1px solid #999; flex-shrink: 0;
-    }
-    h4 { margin: 0 0 10px 0; font-size: 14px; border-bottom: 1px solid #ccc; padding-bottom: 5px; color: #333; }
-
-    /* Notification toast for drawing instructions */
-    #toast {
-        position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-        background: rgba(0,0,0,0.7); color: #fff; padding: 10px 20px; border-radius: 20px;
-        z-index: 200; display: none; font-size: 13px; pointer-events: none;
-    }
+    .legend-item { display: flex; align-items: center; margin-bottom: 4px; }
+    .legend-color { width: 16px; height: 16px; margin-right: 8px; border: 1px solid #ccc; opacity: 0.8; }
   </style>
 </head>
+
 <body>
 
-  <div id="toast"></div>
+<div id="map"></div>
 
-  <div id="controls">
+<div id="controls">
+    <div style="font-weight:bold; font-size:14px; margin-bottom:10px;">Norwich 3D Viewer</div>
+    
     <label class="section-title" style="border:none; padding-top:0;">SBI Loader</label>
     <input type="text" id="sbiInput" value="106721928" placeholder="e.g. 106721928">
-    <button onclick="runMapUpdate()">Load SBI Data</button>
+    <button onclick="runDataLoad()">Load SBI Data</button>
 
     <div class="layer-row">
-        <input type="checkbox" id="chkOFP" checked onchange="toggleOFP(this.checked)">
-        <label for="chkOFP">Show Flow Arrows</label>
-    </div>
-
-    <div class="layer-row">
-        <input type="checkbox" id="chkAwkwardCorners" checked onchange="toggleAwkwardCorners(this.checked)">
-        <label for="chkAwkwardCorners">Awkward Corners</label>
+        <input type="checkbox" id="chkLayers" checked onchange="toggleLayer('sbi-fill', this.checked); toggleLayer('sbi-line', this.checked)">
+        <label for="chkLayers">Land Cover</label>
     </div>
 
     <div class="layer-row">
-        <input type="checkbox" id="chkSatellite" onchange="toggleSatellite(this.checked)">
-        <label for="chkSatellite">Satellite (Mapbox)</label>
+        <input type="checkbox" id="chkOFP" checked onchange="toggleLayer('ofp-arrows', this.checked)">
+        <label for="chkOFP">Flow Arrows</label>
     </div>
 
-    <!-- Drawing Tools Section -->
-    <label class="section-title">New Habitat Creation</label>
-
-    <div class="btn-group">
-        <button id="btnWoodland" onclick="startDrawing('woodland')">Woodland</button>
-        <button id="btnGrassland" onclick="startDrawing('grassland')">Grassland</button>
-        <button id="btnPond" onclick="startDrawing('pond')">Pond</button>
+    <div class="layer-row">
+        <input type="checkbox" id="chkAwkward" checked onchange="toggleLayer('awkward-fill', this.checked); toggleLayer('awkward-line', this.checked)">
+        <label for="chkAwkward">Awkward Corners</label>
     </div>
-    <button onclick="clearDrawings()" style="background:#800;">Clear Features</button>
 
-    <div id="loadingIndicator"></div>
-  </div>
+    <div class="slider-container">
+        <label>Terrain Exaggeration: <span id="exagValue">2.0</span>x</label>
+        <input id="exaggeration" type="range" min="0" max="10" step="0.1" value="2" />
+    </div>
 
-  <div id="legendPanel"></div>
-  <div id="cesiumContainer"></div>
+    <div id="loadingIndicator">Ready.</div>
+</div>
 
-  <script>
-    // 1. Setup Proj4 (British National Grid to WGS84)
+<div id="legendPanel"></div>
+
+<script>
+    // 1. SETUP & CONFIGURATION
+    mapboxgl.accessToken = 'pk.eyJ1Ijoid2lzZWZyb2dtYXBib3giLCJhIjoiY21sZ3R2a2JsMDI0MjNmb2cxbnNpZnVxbiJ9.iFfxLC6MrpS-9I9A2w1DtA';
+    
+    // Define Proj4 for BNG -> WGS84 conversion
     proj4.defs("EPSG:27700", "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs");
 
-    // Colors
+    // Colors mapping
     const landCoverColors = {
         'Arable Land': '#F0E68C', 'Permanent Grassland': '#32CD32', 'Woodland': '#228B22',
         'Natural Woodland': '#006400', 'Pond': '#4682B4', 'Rivers and streams type 3': '#1E90FF',
@@ -123,497 +109,165 @@
         'Residential Gardens': '#90EE90', 'Non-agricultural land': '#A9A9A9', 'default': '#FFeda0'
     };
 
-    // 2. Initialize Viewer
-    const viewer = new Cesium.Viewer('cesiumContainer', {
-      terrainProvider: undefined, // Flat ellipsoid
-      baseLayerPicker: false,
-      timeline: false,
-      animation: false,
-      scene3DOnly: true,
-      infoBox: true,
-      selectionIndicator: true,
-      baseLayer: new Cesium.ImageryLayer(new Cesium.UrlTemplateImageryProvider({
-        url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
-        subdomains: ['a', 'b', 'c', 'd'],
-        credit: '© OpenStreetMap contributors, © CARTO'
-      }))
+    // State
+    let currentSbiGeoJSON = null;
+    const NORWICH_CENTER = [1.29278, 52.62861];
+
+    // 2. INITIALIZE MAP
+    const map = new mapboxgl.Map({
+        container: 'map',
+        style: 'mapbox://styles/mapbox/satellite-v9',
+        center: NORWICH_CENTER,
+        zoom: 13,
+        pitch: 60,
+        bearing: 0
     });
 
-    viewer.scene.msaaSamples = 4; 
-    viewer.scene.postProcessStages.fxaa.enabled = true; 
-    viewer.scene.globe.depthTestAgainstTerrain = false;
+    map.addControl(new mapboxgl.NavigationControl());
 
-    // --- CRITICAL FIX: Disable Double-Click Camera Zoom ---
-    // This prevents the camera from moving/tracking when the user double-clicks to finish the polygon
-    viewer.cesiumWidget.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+    // 3. MAP LOAD EVENT
+    map.on('load', () => {
+        // A. Add 3D Terrain Source
+        map.addSource('mapbox-dem', {
+            'type': 'raster-dem',
+            'url': 'mapbox://mapbox.mapbox-terrain-dem-v1',
+            'tileSize': 512,
+            'maxzoom': 14
+        });
+        
+        map.setTerrain({ 'source': 'mapbox-dem', 'exaggeration': 2.0 });
 
-    // --- POPUP CONTROL LOGIC ---
-    // If we are in drawing mode, we intercept selection changes and cancel them.
-    viewer.selectedEntityChanged.addEventListener(function() {
-        if (drawMode !== null) {
-            viewer.selectedEntity = undefined;
-        }
+        // B. Add Empty Sources for our Data Layers
+        map.addSource('sbi-data', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+        map.addSource('ofp-data', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+        map.addSource('awkward-data', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+
+        // C. Define Layers
+        
+        // 1. SBI Land Cover (Fill)
+        map.addLayer({
+            'id': 'sbi-fill',
+            'type': 'fill',
+            'source': 'sbi-data',
+            'paint': {
+                'fill-color': ['get', 'color'],
+                'fill-opacity': 0.6
+            }
+        });
+
+        // 2. SBI Land Cover (Outline)
+        map.addLayer({
+            'id': 'sbi-line',
+            'type': 'line',
+            'source': 'sbi-data',
+            'paint': {
+                'line-color': '#000',
+                'line-width': 1
+            }
+        });
+
+        // 3. Flow Pathways (Arrows/Lines)
+        // Note: Mapbox doesn't support "arrows" easily on lines without complex icon logic.
+        // We will use a thick colored line to represent flow.
+        map.addLayer({
+            'id': 'ofp-arrows',
+            'type': 'line',
+            'source': 'ofp-data',
+            'layout': {
+                'line-join': 'round',
+                'line-cap': 'round'
+            },
+            'paint': {
+                'line-color': ['case', ['>=', ['get', 'flow'], 50000], '#FF0000', '#0000FF'], // Red for High, Blue for Low
+                'line-width': ['case', ['>=', ['get', 'flow'], 50000], 4, 2]
+            }
+        });
+
+        // 4. Awkward Corners
+        map.addLayer({
+            'id': 'awkward-fill',
+            'type': 'fill',
+            'source': 'awkward-data',
+            'paint': {
+                'fill-color': 'darkorange',
+                'fill-opacity': 0.4
+            }
+        });
+        map.addLayer({
+            'id': 'awkward-line',
+            'type': 'line',
+            'source': 'awkward-data',
+            'paint': {
+                'line-color': 'darkorange',
+                'line-width': 2,
+                'line-dasharray': [2, 2]
+            }
+        });
+
+        // Initial Data Load
+        runDataLoad();
     });
 
-    // 3. State Management
-    let dsRPA = null;
-    let dsOutlines = null;
-    let dsOFP = null; 
-    let dsAwkwardCorners = null;
-    let dsDraw = new Cesium.CustomDataSource('UserDrawings');
-    viewer.dataSources.add(dsDraw);
-    let currentSbiData = null; 
-    let satelliteLayer = null;
+    // 4. DATA LOGIC
 
-    // --- Drawing State ---
-    let drawingHandler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
-    let activeShapePoints = [];
-    let activeShape = null;
-    let floatingPoint = null;
-    let drawMode = null; // 'polygon' or NULL
-    let activeType = null; // 'woodland', 'grassland', 'pond'
-
-    // --- Satellite Toggle Function ---
-    function toggleSatellite(checked) {
-        if(checked) {
-            // Add satellite layer
-            if(!satelliteLayer) {
-                satelliteLayer = viewer.imageryLayers.addImageryProvider(
-                    new Cesium.UrlTemplateImageryProvider({
-                        url: 'https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=pk.eyJ1Ijoid2lzZWZyb2dtYXBib3giLCJhIjoiY21sZ3R2a2JsMDI0MjNmb2cxbnNpZnVxbiJ9.iFfxLC6MrpS-9I9A2w1DtA',
-                        credit: '© Mapbox © OpenStreetMap'
-                    })
-                );
-            } else {
-                satelliteLayer.show = true;
-            }
-
-            // Update Land Cover layer to show outlines only (no fill)
-            if(dsRPA) {
-                const entities = dsRPA.entities.values;
-                for(let i = 0; i < entities.length; i++) {
-                    const entity = entities[i];
-                    if(entity.polygon) {
-                        const desc = entity.properties.DESCRIPTION ? entity.properties.DESCRIPTION.getValue() : 'default';
-
-                        // Make fill completely transparent, show outline
-                        entity.polygon.material = Cesium.Color.TRANSPARENT;
-                        entity.polygon.outline = true;
-                        entity.polygon.outlineColor = Cesium.Color.BLACK;
-                        entity.polygon.outlineWidth = 2;
-
-                        // Remove extrusion for woodland to show outline properly
-                        if (desc === 'Woodland' || desc === 'Natural Woodland') {
-                            entity.polygon.extrudedHeight = undefined;
-                        }
-                    }
-                }
-            }
-        } else {
-            // Hide satellite layer
-            if(satelliteLayer) {
-                satelliteLayer.show = false;
-            }
-
-            // Restore Land Cover layer to original fill styling
-            if(dsRPA) {
-                const entities = dsRPA.entities.values;
-                for(let i = 0; i < entities.length; i++) {
-                    const entity = entities[i];
-                    if(entity.polygon) {
-                        const desc = entity.properties.DESCRIPTION ? entity.properties.DESCRIPTION.getValue() : 'default';
-                        const colorCss = landCoverColors[desc] || landCoverColors['default'];
-                        const color = Cesium.Color.fromCssColorString(colorCss);
-
-                        entity.polygon.outline = false;
-
-                        if (desc === 'Woodland' || desc === 'Natural Woodland') {
-                            entity.polygon.extrudedHeight = 20;
-                            entity.polygon.material = color;
-                        } else {
-                            entity.polygon.extrudedHeight = undefined;
-                            entity.polygon.material = color.withAlpha(0.6);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // --- Drawing Functions ---
-
-    function startDrawing(type) {
-        drawMode = 'polygon';
-        activeType = type;
-        viewer.selectedEntity = undefined;
-
-        activeShapePoints = [];
-        activeShape = null;
-        floatingPoint = null;
-
-        const toast = document.getElementById('toast');
-        toast.style.display = 'block';
-        toast.innerText = `Drawing ${type.charAt(0).toUpperCase() + type.slice(1)}. Left Click to add vertices. Double Click to finish.`;
-
-        // Reset Handler
-        drawingHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_CLICK);
-        drawingHandler.removeInputAction(Cesium.ScreenSpaceEventType.MOUSE_MOVE);
-        drawingHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
-
-        // 1. LEFT CLICK (Add vertex)
-        drawingHandler.setInputAction(function (event) {
-            const earthPosition = viewer.scene.camera.pickEllipsoid(event.position, viewer.scene.globe.ellipsoid);
-            if (Cesium.defined(earthPosition)) {
-                if (activeShapePoints.length === 0) {
-                    activeShapePoints.push(earthPosition);
-                    const dynamicPositions = new Cesium.CallbackProperty(function () {
-                        return new Cesium.PolygonHierarchy(activeShapePoints);
-                    }, false);
-                    activeShape = drawDynamicShape(dynamicPositions);
-                    floatingPoint = createPoint(earthPosition); 
-                }
-                activeShapePoints.push(earthPosition);
-                createPoint(earthPosition); 
-            }
-        }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
-
-        // 2. MOUSE MOVE (Update dynamic shape)
-        drawingHandler.setInputAction(function (event) {
-            if (Cesium.defined(floatingPoint)) {
-                const newPosition = viewer.scene.camera.pickEllipsoid(event.endPosition, viewer.scene.globe.ellipsoid);
-                if (Cesium.defined(newPosition)) {
-                    floatingPoint.position.setValue(newPosition);
-                    activeShapePoints.pop();
-                    activeShapePoints.push(newPosition);
-                }
-            }
-        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
-
-        // 3. DOUBLE CLICK (Finish)
-        drawingHandler.setInputAction(function (event) {
-            terminateShape();
-        }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
-    }
-
-    function createPoint(worldPosition) {
-        // Points get the same color as the feature being drawn for consistency
-        const styles = getDrawStyles(activeType);
-        return dsDraw.entities.add({
-            position: worldPosition,
-            point: {
-                color: styles.outline, // Use outline color for vertices so they stand out
-                pixelSize: 6,
-                heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
-            }
-        });
-    }
-
-    // Helper to get fill and specific darker outline for each type
-    function getDrawStyles(type) {
-        if (type === 'woodland') {
-            return { 
-                color: Cesium.Color.FORESTGREEN.withAlpha(0.6), 
-                outline: Cesium.Color.DARKGREEN // Darker Green
-            };
-        }
-        if (type === 'grassland') {
-            return { 
-                color: Cesium.Color.LAWNGREEN.withAlpha(0.6), 
-                outline: Cesium.Color.OLIVEDRAB // Darker/Muddy Green
-            };
-        }
-        if (type === 'pond') {
-            return { 
-                color: Cesium.Color.DEEPSKYBLUE.withAlpha(0.6), 
-                outline: Cesium.Color.MIDNIGHTBLUE // Darker Blue
-            };
-        }
-        return { color: Cesium.Color.GRAY, outline: Cesium.Color.BLACK };
-    }
-
-    function drawDynamicShape(positionData) {
-        const styles = getDrawStyles(activeType);
-
-        return dsDraw.entities.add({
-            polygon: {
-                hierarchy: positionData,
-                material: styles.color,
-                outline: true,
-                outlineColor: styles.outline,
-                outlineWidth: 3, // Visible width during drawing
-                // Ensure it draws on top of existing layers
-                heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
-            }
-        });
-    }
-
-    function terminateShape() {
-        activeShapePoints.pop(); // Remove floating point
-        activeShapePoints.pop(); // Remove double-click second point
-
-        const styles = getDrawStyles(activeType);
-        let extrudedHeight = undefined;
-
-        // Special logic for Woodland: Extrude to 20m
-        if (activeType === 'woodland') {
-            extrudedHeight = 20;
-        }
-
-        dsDraw.entities.add({
-            name: `User ${activeType.charAt(0).toUpperCase() + activeType.slice(1)}`,
-            description: `Created via Drawing Tool`,
-            polygon: {
-                hierarchy: activeShapePoints,
-                material: styles.color.withAlpha(0.8), // Solidify slightly on finish
-                outline: true,
-                outlineColor: styles.outline, 
-                outlineWidth: 3,
-                extrudedHeight: extrudedHeight // 20m for woodland, undefined for others
-            }
-        });
-
-        // Cleanup
-        dsDraw.entities.remove(activeShape);
-        dsDraw.entities.remove(floatingPoint);
-        const entities = dsDraw.entities.values;
-        for (let i = entities.length - 1; i >= 0; i--) {
-            if (entities[i].point && !entities[i].description) {
-                dsDraw.entities.remove(entities[i]);
-            }
-        }
-        resetDrawing();
-    }
-
-    function resetDrawing() {
-        drawMode = null; 
-        activeType = null;
-        activeShapePoints = [];
-        activeShape = null;
-        floatingPoint = null;
-        drawingHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_CLICK);
-        drawingHandler.removeInputAction(Cesium.ScreenSpaceEventType.MOUSE_MOVE);
-        drawingHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
-        document.getElementById('toast').style.display = 'none';
-    }
-
-    function clearDrawings() {
-        dsDraw.entities.removeAll();
-    }
-
-    // --- Helper: Resample LineString to vertex every X meters ---
-    function resampleLine(lineFeature, intervalMeters = 20) {
-        const length = turf.length(lineFeature, {units: 'meters'});
-        if (length <= intervalMeters) return lineFeature;
-
-        const newCoords = [];
-        for (let step = 0; step <= length; step += intervalMeters) {
-            const pt = turf.along(lineFeature, step, {units: 'meters'});
-            newCoords.push(pt.geometry.coordinates);
-        }
-        const endPt = turf.along(lineFeature, length, {units: 'meters'});
-        newCoords.push(endPt.geometry.coordinates);
-        return turf.lineString(newCoords, lineFeature.properties);
-    }
-
-    // --- Helper: Reproject BNG -> WGS84 ---
-    function reprojectGeoJSON(geojson) {
-        let cloned = JSON.parse(JSON.stringify(geojson));
-        const transform = (coords) => {
-            const wgs = proj4('EPSG:27700', 'EPSG:4326', coords);
-            return [wgs[0], wgs[1], 2]; 
-        };
-        const transformGeometry = (geometry) => {
-            if (geometry.type === 'Polygon' || geometry.type === 'MultiLineString') {
-                geometry.coordinates = geometry.coordinates.map(ring => ring.map(transform));
-            } else if (geometry.type === 'MultiPolygon') {
-                geometry.coordinates = geometry.coordinates.map(poly => poly.map(ring => ring.map(transform)));
-            } else if (geometry.type === 'LineString') {
-                geometry.coordinates = geometry.coordinates.map(transform);
-            }
-        };
-        if (cloned.type === 'FeatureCollection') {
-            cloned.features.forEach(f => transformGeometry(f.geometry));
-        } else if (cloned.type === 'Feature') {
-            transformGeometry(cloned.geometry);
-        }
-        return turf.rewind(cloned, {reverse: false, mutate: true});
-    }
-
-    // --- Load Awkward Corners Layer ---
-    async function loadAwkwardCorners() {
-        const loader = document.getElementById('loadingIndicator');
-        try {
-            loader.innerText = "Loading Awkward Corners...";
-            const url = 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/users%2FAbE2j6m8F1aQ7e68C9dVBGPmhLS2%2Fstock_files%2FMucklton%20Farm%20awkward%20corners%20WGS1984.geojson?alt=media&token=0cdd33b5-fd1f-4c12-9388-b076e8b40a32';
-
-            const response = await fetch(url);
-            if(!response.ok) throw new Error("Failed to load Awkward Corners");
-            const data = await response.json();
-
-            dsAwkwardCorners = await Cesium.GeoJsonDataSource.load(data, { 
-                clampToGround: true,
-                stroke: Cesium.Color.DARKORANGE,
-                strokeWidth: 2
-            });
-
-            // Style all entities in the datasource
-            const entities = dsAwkwardCorners.entities.values;
-            for(let i = 0; i < entities.length; i++) {
-                const entity = entities[i];
-                entity.name = 'Awkward Corner';
-
-                if(entity.polyline) {
-                    entity.polyline.material = Cesium.Color.DARKORANGE;
-                    entity.polyline.width = 2;
-                }
-                if(entity.polygon) {
-                    entity.polygon.material = Cesium.Color.DARKORANGE.withAlpha(0.3);
-                    entity.polygon.outline = true;
-                    entity.polygon.outlineColor = Cesium.Color.DARKORANGE;
-                    entity.polygon.outlineWidth = 2;
-                }
-            }
-
-            if(document.getElementById('chkAwkwardCorners').checked) {
-                viewer.dataSources.add(dsAwkwardCorners);
-            }
-
-            loader.innerText = "Ready.";
-        } catch(e) {
-            console.error(e);
-            loader.innerText = "Error loading Awkward Corners: " + e.message;
-        }
-    }
-
-    function toggleAwkwardCorners(checked) {
-        if(checked) {
-            if(dsAwkwardCorners) {
-                if(!viewer.dataSources.contains(dsAwkwardCorners)) {
-                    viewer.dataSources.add(dsAwkwardCorners);
-                }
-            } else {
-                loadAwkwardCorners();
-            }
-        } else {
-            if(dsAwkwardCorners) {
-                viewer.dataSources.remove(dsAwkwardCorners);
-            }
-        }
-    }
-
-    // --- Main Update Function ---
-    async function runMapUpdate() {
+    async function runDataLoad() {
         const sbi = document.getElementById('sbiInput').value.trim();
         const loader = document.getElementById('loadingIndicator');
         const legend = document.getElementById('legendPanel');
-
-        if(!sbi) return alert("Enter SBI");
-
-        if(dsRPA) viewer.dataSources.remove(dsRPA);
-        if(dsOutlines) viewer.dataSources.remove(dsOutlines);
-        if(dsOFP) viewer.dataSources.remove(dsOFP);
-        dsOFP = null; 
-
         legend.style.display = 'none';
+
+        if(!sbi) return alert("Please enter an SBI number.");
+
         loader.style.display = 'block';
         loader.innerText = "Fetching RPA Data...";
 
         try {
-            // A. Load RPA Data
+            // A. Fetch RPA Data
             const url = `https://environment.data.gov.uk/data-services/RPA/LandCovers/wfs?version=2.0.0&request=GetFeature&typeNames=RPA:LandCovers&cql_filter=SBI=${sbi}&srsname=EPSG:27700&outputFormat=application/json`;
             const response = await fetch(url);
             if(!response.ok) throw new Error("RPA Service Error");
             const data = await response.json();
-            if (!data.features || data.features.length === 0) throw new Error("No SBI Data found");
-
-            const wgs84Data = reprojectGeoJSON(data);
-            currentSbiData = wgs84Data; 
-
-            // 1. Load Fills
-            dsRPA = await Cesium.GeoJsonDataSource.load(wgs84Data, { clampToGround: false });
-            const entities = dsRPA.entities.values;
-            const foundCategories = new Set();
-            const isSatelliteOn = document.getElementById('chkSatellite').checked;
-
-            for (let i = 0; i < entities.length; i++) {
-                const entity = entities[i];
-                const desc = entity.properties.DESCRIPTION ? entity.properties.DESCRIPTION.getValue() : 'default';
-                foundCategories.add(desc);
-                const colorCss = landCoverColors[desc] || landCoverColors['default'];
-                const color = Cesium.Color.fromCssColorString(colorCss);
-
-                if(entity.polygon) {
-                    if(isSatelliteOn) {
-                        // Satellite mode: outline only
-                        entity.polygon.material = Cesium.Color.TRANSPARENT;
-                        entity.polygon.outline = true;
-                        entity.polygon.outlineColor = Cesium.Color.BLACK;
-                        entity.polygon.outlineWidth = 2;
-                        entity.polygon.extrudedHeight = undefined;
-                    } else {
-                        // Normal mode: fills with colors
-                        entity.polygon.outline = false; 
-                        entity.polygon.height = 0;
-                        if (desc === 'Woodland' || desc === 'Natural Woodland') {
-                            entity.polygon.extrudedHeight = 20; 
-                            entity.polygon.material = color;    
-                        } else {
-                            entity.polygon.extrudedHeight = undefined; 
-                            entity.polygon.material = color.withAlpha(0.6); 
-                        }
-                    }
-                }
-            }
-            viewer.dataSources.add(dsRPA);
-
-            // 2. Load Outlines (only if not in satellite mode)
-            if(!isSatelliteOn) {
-                const outlinesGeoJSON = { type: "FeatureCollection", features: [] };
-                wgs84Data.features.forEach(f => {
-                    if (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon') {
-                        const lines = turf.polygonToLine(f);
-                        if (lines.type === 'FeatureCollection') outlinesGeoJSON.features.push(...lines.features);
-                        else outlinesGeoJSON.features.push(lines);
-                    }
-                });
-
-                dsOutlines = await Cesium.GeoJsonDataSource.load(outlinesGeoJSON, { clampToGround: false });
-                const outlineEntities = dsOutlines.entities.values;
-                for(let i=0; i<outlineEntities.length; i++) {
-                    const ent = outlineEntities[i];
-                    if(ent.polyline) {
-                        ent.polyline.material = Cesium.Color.BLACK;
-                        ent.polyline.width = 1.0; 
-                    }
-                }
-                viewer.dataSources.add(dsOutlines);
+            
+            if (!data.features || data.features.length === 0) {
+                loader.innerText = "No data found for this SBI.";
+                return;
             }
 
-            viewer.zoomTo(dsRPA);
-
-            // B. Build Legend
-            legend.innerHTML = '<h4>Land Cover</h4>';
-            Array.from(foundCategories).sort().forEach(c => {
-                const color = landCoverColors[c] || landCoverColors['default'];
-                legend.innerHTML += `<div class="legend-item"><i style="background:${color}"></i><span>${c}</span></div>`;
+            // B. Process & Reproject RPA Data
+            const processedFeatures = data.features.map(f => {
+                // Reproject Geometry
+                const reprojected = reprojectGeoJSONFeature(f);
+                // Assign Color Property for styling
+                const desc = f.properties.DESCRIPTION || 'default';
+                reprojected.properties.color = landCoverColors[desc] || landCoverColors['default'];
+                reprojected.properties.description = desc;
+                return reprojected;
             });
-            legend.innerHTML += `<hr><div style="font-weight:bold; font-size:11px; margin-bottom:5px;">Flow Pathways:</div>
-            <div class="legend-item"><i style="background:red; width:10px; height:10px; clip-path: polygon(0 0, 100% 50%, 0 100%); margin-right:5px;"></i><span>High Flow (Arrows)</span></div>
-            <div class="legend-item"><i style="background:blue; width:10px; height:10px; clip-path: polygon(0 0, 100% 50%, 0 100%); margin-right:5px;"></i><span>Low Flow (Arrows)</span></div>
-            <hr><div class="legend-item"><i style="background:darkorange; opacity:0.6;"></i><span>Awkward Corners</span></div>`;
-            legend.style.display = 'block';
 
-            // C. Trigger OFP
+            const sbiGeoJSON = { type: 'FeatureCollection', features: processedFeatures };
+            currentSbiGeoJSON = sbiGeoJSON;
+            
+            // Update Map Source
+            map.getSource('sbi-data').setData(sbiGeoJSON);
+
+            // Fit Bounds
+            const bbox = turf.bbox(sbiGeoJSON);
+            map.fitBounds(bbox, { padding: 50, pitch: 60 });
+
+            // Build Legend
+            buildLegend(processedFeatures);
+
+            // C. Load Flow Pathways
             if(document.getElementById('chkOFP').checked) {
-                loadClusteredOFP(currentSbiData);
-            } else {
-                loader.innerText = "Ready.";
+                loadClusteredOFP(sbiGeoJSON);
             }
 
             // D. Load Awkward Corners
-            if(document.getElementById('chkAwkwardCorners').checked) {
+            if(document.getElementById('chkAwkward').checked) {
                 loadAwkwardCorners();
             }
+
+            loader.innerText = "Data Loaded.";
 
         } catch (e) {
             console.error(e);
@@ -621,121 +275,133 @@
         }
     }
 
-    // --- OPTIMIZED Flow Pathways Logic (Density-Based Clustering) ---
     async function loadClusteredOFP(sbiGeoJSON) {
         const loader = document.getElementById('loadingIndicator');
-        loader.innerText = "Analyzing Clusters...";
+        loader.innerText = "Loading Flow Pathways...";
 
         try {
+            // 1. Cluster centroids to minimize API calls (DBSCAN)
             const centroids = turf.featureCollection(sbiGeoJSON.features.map(f => turf.centroid(f)));
-            const maxDistKm = 0.5; 
-            const clustered = turf.clustersDbscan(centroids, maxDistKm, { units: 'kilometers', minPoints: 1 });
+            const clustered = turf.clustersDbscan(centroids, 0.5, { units: 'kilometers', minPoints: 1 });
+            
             const clusters = {};
-            clustered.features.forEach((centroid, index) => {
-                const clusterId = centroid.properties.cluster !== undefined ? centroid.properties.cluster : -1;
-                if (!clusters[clusterId]) clusters[clusterId] = [];
-                clusters[clusterId].push(sbiGeoJSON.features[index]);
+            clustered.features.forEach((c, i) => {
+                const cid = c.properties.cluster !== undefined ? c.properties.cluster : -1;
+                if(!clusters[cid]) clusters[cid] = [];
+                clusters[cid].push(sbiGeoJSON.features[i]);
             });
 
-            const clusterIds = Object.keys(clusters);
-            loader.innerText = `Detected ${clusterIds.length} parcel clusters. Fetching OFP...`;
+            // 2. Query ArcGIS FeatureServer for each cluster bbox
             const ofpUrl = "https://services1.arcgis.com/JZM7qJpmv7vJ0Hzx/arcgis/rest/services/OverlandFlowPathwaysForPublicALERTEngland_20240318/FeatureServer/0";
-
+            const clusterIds = Object.keys(clusters);
+            
             const promises = clusterIds.map(id => {
-                const clusterFeatures = turf.featureCollection(clusters[id]);
-                const bbox = turf.bbox(clusterFeatures); 
-                const bboxStr = bbox.join(',');
-                const queryUrl = `${ofpUrl}/query?f=geojson&geometry=${bboxStr}&geometryType=esriGeometryEnvelope&spatialRel=esriSpatialRelIntersects&outFields=*&outSR=4326`;
-                return fetch(queryUrl).then(r => r.json()).then(data => data.features || []).catch(err => []);
+                const group = turf.featureCollection(clusters[id]);
+                const bbox = turf.bbox(group);
+                const query = `${ofpUrl}/query?f=geojson&geometry=${bbox.join(',')}&geometryType=esriGeometryEnvelope&spatialRel=esriSpatialRelIntersects&outFields=*&outSR=4326`;
+                return fetch(query).then(r => r.json()).then(d => d.features || []).catch(e => []);
             });
 
             const results = await Promise.all(promises);
-            let allFeatures = [];
-            let seenIds = new Set();
-            results.forEach(features => {
-                features.forEach(f => {
-                    const fid = f.properties.OBJECTID || f.id; 
-                    if (!seenIds.has(fid)) {
-                        seenIds.add(fid);
-                        allFeatures.push(f);
-                    }
-                });
+            
+            // 3. Deduplicate results
+            const allFeatures = [];
+            const seen = new Set();
+            results.flat().forEach(f => {
+                const fid = f.properties.OBJECTID || f.id; 
+                if(!seen.has(fid)) {
+                    seen.add(fid);
+                    allFeatures.push(f);
+                }
             });
 
-            if (allFeatures.length === 0) {
-                loader.innerText = "No Flow Pathways found.";
-                return;
-            }
-
-            loader.innerText = `Filtering ${allFeatures.length} paths by intersection...`;
-            await new Promise(r => setTimeout(r, 20));
-
-            const finalFeatures = allFeatures.filter(ofpFeature => {
-                return sbiGeoJSON.features.some(sbiFeature => {
-                    return turf.booleanIntersects(ofpFeature, sbiFeature);
-                });
+            // 4. Client-side Intersection Filter
+            // Only keep lines that actually touch/cross the SBI polygons
+            const filtered = allFeatures.filter(ofp => {
+                // Enrich properties for styling
+                ofp.properties.flow = ofp.properties.MaxFlowAcc || 0;
+                return sbiGeoJSON.features.some(sbi => turf.booleanIntersects(ofp, sbi));
             });
 
-            if(finalFeatures.length === 0) {
-                loader.innerText = "No Flow Pathways intersect this SBI.";
-                return;
-            }
+            map.getSource('ofp-data').setData({ type: 'FeatureCollection', features: filtered });
+            loader.innerText = `Loaded ${filtered.length} Flow Paths.`;
 
-            loader.innerText = `Generating Arrows for ${finalFeatures.length} paths...`;
-            await new Promise(r => setTimeout(r, 20));
-
-            dsOFP = new Cesium.CustomDataSource('FlowArrows');
-            let arrowCount = 0;
-
-            for(let i=0; i<finalFeatures.length; i++) {
-                const f = finalFeatures[i];
-                const flowVal = f.properties.MaxFlowAcc || 0;
-                let color, width;
-                if (flowVal >= 50000) { color = Cesium.Color.RED; width = 8.0; } 
-                else { color = Cesium.Color.BLUE; width = 6.0; }
-
-                let geom = f;
-                if(f.geometry.type === 'LineString') {
-                    geom = resampleLine(f, 40); 
-                }
-                const coords = geom.geometry.coordinates;
-                for(let j=0; j<coords.length - 1; j++) {
-                    const start = coords[j];
-                    const end = coords[j+1];
-                    dsOFP.entities.add({
-                        polyline: {
-                            positions: Cesium.Cartesian3.fromDegreesArrayHeights([
-                                start[0], start[1], 4, end[0], end[1], 4
-                            ]),
-                            width: width,
-                            material: new Cesium.PolylineArrowMaterialProperty(color),
-                            clampToGround: false
-                        }
-                    });
-                    arrowCount++;
-                }
-            }
-            if(document.getElementById('chkOFP').checked) viewer.dataSources.add(dsOFP);
-            loader.innerText = "Ready.";
-        } catch (e) {
-            console.error(e);
-            loader.innerText = "OFP Error: " + e.message;
+        } catch(e) {
+            console.error("OFP Error", e);
+            loader.innerText = "OFP Load Error";
         }
     }
 
-    function toggleOFP(checked) {
-        if(checked) {
-            if(dsOFP) {
-                if(!viewer.dataSources.contains(dsOFP)) viewer.dataSources.add(dsOFP);
-            } else if(currentSbiData) {
-                loadClusteredOFP(currentSbiData);
-            }
-        } else {
-            if(dsOFP) viewer.dataSources.remove(dsOFP);
+    async function loadAwkwardCorners() {
+        const url = 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/users%2FAbE2j6m8F1aQ7e68C9dVBGPmhLS2%2Fstock_files%2FMucklton%20Farm%20awkward%20corners%20WGS1984.geojson?alt=media&token=0cdd33b5-fd1f-4c12-9388-b076e8b40a32';
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            map.getSource('awkward-data').setData(data);
+        } catch(e) {
+            console.error("Awkward Corners Error", e);
         }
     }
 
-    runMapUpdate();
-  </script>
+    // 5. HELPER FUNCTIONS
+
+    // Coordinate Transform (BNG -> WGS84)
+    function reprojectGeoJSONFeature(feature) {
+        const f = JSON.parse(JSON.stringify(feature));
+        const transform = (coords) => proj4('EPSG:27700', 'EPSG:4326', coords);
+        
+        const transformGeom = (g) => {
+            if(g.type === 'Polygon' || g.type === 'MultiLineString') g.coordinates = g.coordinates.map(r => r.map(transform));
+            else if(g.type === 'MultiPolygon') g.coordinates = g.coordinates.map(p => p.map(r => r.map(transform)));
+            else if(g.type === 'LineString') g.coordinates = g.coordinates.map(transform);
+        };
+        
+        transformGeom(f.geometry);
+        return turf.rewind(f, {reverse: false, mutate: true});
+    }
+
+    function buildLegend(features) {
+        const legend = document.getElementById('legendPanel');
+        const categories = new Set(features.map(f => f.properties.description));
+        
+        let html = '<strong>Land Cover</strong><br>';
+        Array.from(categories).sort().forEach(cat => {
+            const color = landCoverColors[cat] || landCoverColors['default'];
+            html += `<div class="legend-item"><div class="legend-color" style="background:${color}"></div>${cat}</div>`;
+        });
+        
+        html += '<hr><strong>Flow Pathways</strong><br>';
+        html += `<div class="legend-item"><div class="legend-color" style="background:red; height:4px; margin-top:6px;"></div>High Flow (>50k)</div>`;
+        html += `<div class="legend-item"><div class="legend-color" style="background:blue; height:2px; margin-top:7px;"></div>Low Flow</div>`;
+        
+        legend.innerHTML = html;
+        legend.style.display = 'block';
+    }
+
+    function toggleLayer(layerId, visible) {
+        if(map.getLayer(layerId)) {
+            map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
+        }
+    }
+
+    // 6. UI INTERACTION
+    
+    // Slider Logic
+    document.getElementById('exaggeration').addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        document.getElementById('exagValue').innerText = val.toFixed(1);
+        map.setTerrain({ 'source': 'mapbox-dem', 'exaggeration': val });
+    });
+
+    // Popups
+    map.on('click', 'sbi-fill', (e) => {
+        const props = e.features[0].properties;
+        new mapboxgl.Popup()
+            .setLngLat(e.lngLat)
+            .setHTML(`<strong>${props.description}</strong><br>Area: ${props.Hectares || '?'} ha`)
+            .addTo(map);
+    });
+
+</script>
 </body>
 </html>
