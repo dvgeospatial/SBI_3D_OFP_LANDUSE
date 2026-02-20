@@ -9,7 +9,7 @@
   <link href="https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.css" rel="stylesheet" />
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.js"></script>
 
-  <!-- Proj4 & Turf.js for Coordinate Conversion & Analysis -->
+  <!-- Proj4 & Turf.js -->
   <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.0/dist/proj4.js"></script>
   <script src="https://unpkg.com/@turf/turf/turf.min.js"></script>
 
@@ -17,7 +17,6 @@
     body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
     #map { position: absolute; top: 0; bottom: 0; width: 100%; }
 
-    /* UI Controls Panel (Left) */
     #controls {
       position: absolute; top: 10px; left: 10px; z-index: 100;
       background: rgba(255, 255, 255, 0.95); padding: 16px; border-radius: 8px;
@@ -42,12 +41,10 @@
         font-size: 12px; color: #666; margin-top: 8px; display: none; font-style: italic;
     }
 
-    /* Terrain Slider */
     .slider-container { margin-top: 12px; border-top: 1px solid #eee; padding-top:12px; }
     .slider-container label { display: block; font-size: 12px; margin-bottom: 6px; font-weight: 600; }
     input[type=range] { width: 100%; cursor: pointer; }
 
-    /* Custom Navigation Panel (Top Right) */
     #nav-controls {
         position: absolute; top: 10px; right: 50px;
         z-index: 100;
@@ -93,12 +90,10 @@
 
 <div id="map"></div>
 
-<!-- Custom Navigation Help & Buttons -->
 <div id="nav-controls">
     <div class="nav-instruction-box">
         <span>Hold <span class="key-hint">Ctrl</span> + Drag to Rotate</span>
     </div>
-
     <div style="display:flex; gap:6px;">
         <button class="custom-nav-btn" onclick="rotateCamera()" title="Rotate Camera 45°">
             <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
@@ -122,9 +117,12 @@
         <label for="chkLayers">Land Cover</label>
     </div>
 
+    <!-- OFP: simplified + ant path animation -->
     <div class="layer-row">
-        <input type="checkbox" id="chkOFP" checked onchange="toggleLayer('ofp-arrows', this.checked)">
-        <label for="chkOFP">Flow Arrows</label>
+        <input type="checkbox" id="chkOFP" checked
+               onchange="toggleLayer('ofp-line-background', this.checked);
+                         toggleLayer('ofp-line-dashed', this.checked)">
+        <label for="chkOFP">Flow (ant path)</label>
     </div>
 
     <div class="layer-row">
@@ -132,7 +130,6 @@
         <label for="chkAwkward">Awkward Corners</label>
     </div>
 
-    <!-- NEW: Hedges -->
     <div class="layer-row">
         <input type="checkbox" id="chkHedges" checked onchange="toggleHedges(this.checked)">
         <label for="chkHedges">Hedges (3D)</label>
@@ -147,411 +144,474 @@
 </div>
 
 <script>
-    // 1. SETUP & CONFIGURATION
-    mapboxgl.accessToken = 'pk.eyJ1Ijoid2lzZWZyb2dtYXBib3giLCJhIjoiY21sZ3R2a2JsMDI0MjNmb2cxbnNpZnVxbiJ9.iFfxLC6MrpS-9I9A2w1DtA';
+  mapboxgl.accessToken = 'pk.eyJ1Ijoid2lzZWZyb2dtYXBib3giLCJhIjoiY21sZ3R2a2JsMDI0MjNmb2cxbnNpZnVxbiJ9.iFfxLC6MrpS-9I9A2w1DtA';
 
-    // NEW: Hedges URL
-    const HEDGES_URL = "https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_PROFILE%2FVEG.geojson?alt=media&token=3fa401bb-5cff-4adc-808b-f15db4ffa9f0";
-    let hedgesLoaded = false;
+  const HEDGES_URL = "https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/HEDGEROW_PROFILE%2FVEG.geojson?alt=media&token=3fa401bb-5cff-4adc-808b-f15db4ffa9f0";
+  let hedgesLoaded = false;
 
-    // Define Proj4 for BNG -> WGS84 conversion
-    proj4.defs("EPSG:27700", "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs");
+  proj4.defs("EPSG:27700", "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs");
 
-    // Colors mapping
-    const landCoverColors = {
-        'Arable Land': '#F0E68C', 'Permanent Grassland': '#32CD32', 'Woodland': '#228B22',
-        'Natural Woodland': '#006400', 'Pond': '#4682B4', 'Rivers and streams type 3': '#1E90FF',
-        'Drain/Ditch/Dyke': '#00BFFF', 'Farm Building': '#8B4513', 'Residential dwelling, House': '#CD5C5C',
-        'Farmyards': '#D2B48C', 'Track - Natural Surface': '#DEB887', 'Metalled track': '#808080',
-        'Residential Gardens': '#90EE90', 'Non-agricultural land': '#A9A9A9', 'default': '#FFeda0'
+  const landCoverColors = {
+    'Arable Land': '#F0E68C', 'Permanent Grassland': '#32CD32', 'Woodland': '#228B22',
+    'Natural Woodland': '#006400', 'Pond': '#4682B4', 'Rivers and streams type 3': '#1E90FF',
+    'Drain/Ditch/Dyke': '#00BFFF', 'Farm Building': '#8B4513', 'Residential dwelling, House': '#CD5C5C',
+    'Farmyards': '#D2B48C', 'Track - Natural Surface': '#DEB887', 'Metalled track': '#808080',
+    'Residential Gardens': '#90EE90', 'Non-agricultural land': '#A9A9A9', 'default': '#FFeda0'
+  };
+
+  let currentSbiGeoJSON = null;
+  const NORWICH_CENTER = [1.29278, 52.62861];
+
+  // ant path state
+  let dashArraySequence = [];
+  let antStep = 0;
+  let antAnimating = false;
+
+  const map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/mapbox/satellite-v9',
+    center: NORWICH_CENTER,
+    zoom: 13,
+    pitch: 60,
+    bearing: 0,
+    projection: 'globe'
+  });
+
+  map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
+  map.addControl(new mapboxgl.ScaleControl(), 'bottom-left');
+
+  map.on('load', () => {
+    map.addSource('mapbox-dem', {
+      type: 'raster-dem',
+      url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+      tileSize: 512,
+      maxzoom: 14
+    });
+    map.setTerrain({ source: 'mapbox-dem', exaggeration: 2.0 });
+
+    map.addLayer({
+      id: 'sky',
+      type: 'sky',
+      paint: {
+        'sky-type': 'atmosphere',
+        'sky-atmosphere-sun': [0.0, 0.0],
+        'sky-atmosphere-sun-intensity': 15
+      }
+    });
+
+    map.addSource('sbi-data', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addSource('ofp-data', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addSource('ofp-segments-data', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addSource('awkward-data', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addSource('hedges-data', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+
+    map.addLayer({
+      id: 'sbi-fill',
+      type: 'fill',
+      source: 'sbi-data',
+      paint: {
+        'fill-color': ['get', 'color'],
+        'fill-opacity': 0.6
+      }
+    });
+
+    map.addLayer({
+      id: 'sbi-line',
+      type: 'line',
+      source: 'sbi-data',
+      paint: {
+        'line-color': '#000',
+        'line-width': 1
+      }
+    });
+
+    // OFP background line (fills gaps)
+    map.addLayer({
+      id: 'ofp-line-background',
+      type: 'line',
+      source: 'ofp-segments-data',
+      paint: {
+        'line-color': 'yellow',
+        'line-width': 6,
+        'line-opacity': 0.4
+      }
+    });
+
+    // OFP dashed line that will be animated, exactly like example's `line-dashed`[web:111]
+    map.addLayer({
+      id: 'ofp-line-dashed',
+      type: 'line',
+      source: 'ofp-segments-data',
+      paint: {
+        'line-color': 'yellow',
+        'line-width': 6,
+        'line-dasharray': [0, 4, 3],
+        'line-emissive-strength': 1
+      }
+    });
+
+    // Awkward corners
+    map.addLayer({
+      id: 'awkward-fill',
+      type: 'fill',
+      source: 'awkward-data',
+      paint: {
+        'fill-color': 'darkorange',
+        'line-opacity': 0.4
+      }
+    });
+    map.addLayer({
+      id: 'awkward-line',
+      type: 'line',
+      source: 'awkward-data',
+      paint: {
+        'line-color': 'darkorange',
+        'line-width': 2,
+        'line-dasharray': [2, 2]
+      }
+    });
+
+    // Hedges
+    map.addLayer({
+      id: 'hedges-extrusion',
+      type: 'fill-extrusion',
+      source: 'hedges-data',
+      layout: { visibility: 'visible' },
+      paint: {
+        'fill-extrusion-color': '#2e8b57',
+        'fill-extrusion-opacity': 0.75,
+        'fill-extrusion-height': [
+          'coalesce',
+          ['to-number', ['get', 'height']], 2
+        ],
+        'fill-extrusion-base': 0
+      }
+    });
+
+    map.addLayer({
+      id: 'hedges-outline',
+      type: 'line',
+      source: 'hedges-data',
+      layout: { visibility: 'visible' },
+      paint: {
+        'line-color': '#0b3d1f',
+        'line-width': 1
+      }
+    });
+
+    map.on('click', 'hedges-extrusion', (e) => {
+      const props = e.features?.[0]?.properties || {};
+      new mapboxgl.Popup()
+        .setLngLat(e.lngLat)
+        .setHTML(`<strong>Vegetation</strong><br>Height: ${props.height ?? 'N/A'} m`)
+        .addTo(map);
+    });
+
+    toggleHedges(document.getElementById('chkHedges').checked);
+
+    // Prepare dash sequence from Mapbox example[web:111][web:113]
+    dashArraySequence = [
+      [0, 4, 3],
+      [0.5, 4, 2.5],
+      [1, 4, 2],
+      [1.5, 4, 1.5],
+      [2, 4, 1],
+      [2.5, 4, 0.5],
+      [3, 4, 0],
+      [0, 0.5, 3, 3.5],
+      [0, 1, 3, 3],
+      [0, 1.5, 3, 2.5],
+      [0, 2, 3, 2],
+      [0, 2.5, 3, 1.5],
+      [0, 3, 3, 1],
+      [0, 3.5, 3, 0.5]
+    ];
+
+    runDataLoad();
+  });
+
+  async function runDataLoad() {
+    const sbi = document.getElementById('sbiInput').value.trim();
+    const loader = document.getElementById('loadingIndicator');
+
+    if (!sbi) return alert("Please enter an SBI number.");
+
+    loader.style.display = 'block';
+    loader.innerText = "Fetching RPA Data...";
+
+    try {
+      const url = `https://environment.data.gov.uk/data-services/RPA/LandCovers/wfs?version=2.0.0&request=GetFeature&typeNames=RPA:LandCovers&cql_filter=SBI=${sbi}&srsname=EPSG:27700&outputFormat=application/json`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error("RPA Service Error");
+      const data = await response.json();
+
+      if (!data.features || data.features.length === 0) {
+        loader.innerText = "No data found for this SBI.";
+        return;
+      }
+
+      const processedFeatures = data.features.map(f => {
+        const reprojected = reprojectGeoJSONFeature(f);
+        const desc = f.properties.DESCRIPTION || 'default';
+        reprojected.properties.color = landCoverColors[desc] || landCoverColors['default'];
+        reprojected.properties.description = desc;
+        return reprojected;
+      });
+
+      const sbiGeoJSON = { type: 'FeatureCollection', features: processedFeatures };
+      currentSbiGeoJSON = sbiGeoJSON;
+
+      map.getSource('sbi-data').setData(sbiGeoJSON);
+
+      const bbox = turf.bbox(sbiGeoJSON);
+      map.fitBounds(bbox, { padding: 50, pitch: 60 });
+
+      if (document.getElementById('chkOFP').checked) {
+        await loadClusteredOFP(sbiGeoJSON);
+      }
+
+      if (document.getElementById('chkAwkward').checked) {
+        loadAwkwardCorners();
+      }
+
+      loader.innerText = "Data Loaded.";
+    } catch (e) {
+      console.error(e);
+      loader.innerText = "Error: " + e.message;
+    }
+  }
+
+  async function loadClusteredOFP(sbiGeoJSON) {
+    const loader = document.getElementById('loadingIndicator');
+    loader.innerText = "Loading Flow Pathways...";
+
+    try {
+      const centroids = turf.featureCollection(sbiGeoJSON.features.map(f => turf.centroid(f)));
+      const clustered = turf.clustersDbscan(centroids, 0.5, { units: 'kilometers', minPoints: 1 });
+
+      const clusters = {};
+      clustered.features.forEach((c, i) => {
+        const cid = c.properties.cluster !== undefined ? c.properties.cluster : -1;
+        if (!clusters[cid]) clusters[cid] = [];
+        clusters[cid].push(sbiGeoJSON.features[i]);
+      });
+
+      const ofpUrl = "https://services1.arcgis.com/JZM7qJpmv7vJ0Hzx/arcgis/rest/services/OverlandFlowPathwaysForPublicALERTEngland_20240318/FeatureServer/0";
+      const clusterIds = Object.keys(clusters);
+
+      const promises = clusterIds.map(id => {
+        const group = turf.featureCollection(clusters[id]);
+        const bbox = turf.bbox(group);
+        const query = `${ofpUrl}/query?f=geojson&geometry=${bbox.join(',')}&geometryType=esriGeometryEnvelope&spatialRel=esriSpatialRelIntersects&outFields=*&outSR=4326`;
+        return fetch(query).then(r => r.json()).then(d => d.features || []).catch(() => []);
+      });
+
+      const results = await Promise.all(promises);
+
+      const allFeatures = [];
+      const seen = new Set();
+      results.flat().forEach(f => {
+        const fid = f.properties.OBJECTID || f.id;
+        if (!seen.has(fid)) {
+          seen.add(fid);
+          allFeatures.push(f);
+        }
+      });
+
+      const filtered = allFeatures.filter(ofp => {
+        ofp.properties.flow = ofp.properties.MaxFlowAcc || 0;
+        return sbiGeoJSON.features.some(sbi => turf.booleanIntersects(ofp, sbi));
+      });
+
+      map.getSource('ofp-data').setData({ type: 'FeatureCollection', features: filtered });
+
+      // resample OFP lines into short segments
+      const segFeatures = [];
+      const stepMeters = 40;
+      filtered.forEach(f => {
+        if (!f.geometry) return;
+        if (f.geometry.type === 'LineString') {
+          resampleAndSegmentLine(f, f.geometry.coordinates, stepMeters, segFeatures);
+        } else if (f.geometry.type === 'MultiLineString') {
+          f.geometry.coordinates.forEach(coords => {
+            resampleAndSegmentLine(f, coords, stepMeters, segFeatures);
+          });
+        }
+      });
+
+      map.getSource('ofp-segments-data').setData({
+        type: 'FeatureCollection',
+        features: segFeatures
+      });
+
+      // start ant path animation once there is data
+      startAntPathAnimation();
+
+      loader.innerText = `Loaded ${filtered.length} OFP lines and ${segFeatures.length} segments.`;
+    } catch (e) {
+      console.error("OFP Error", e);
+      loader.innerText = "OFP Load Error: " + e.message;
+    }
+  }
+
+  function resampleAndSegmentLine(sourceFeature, coords, intervalMeters, outArray) {
+    if (!coords || coords.length < 2) return;
+    const line = turf.lineString(coords, sourceFeature.properties || {});
+    const totalLength = turf.length(line, { units: 'meters' });
+    if (!totalLength || totalLength <= 0) return;
+
+    const resampled = [];
+    for (let d = 0; d <= totalLength; d += intervalMeters) {
+      const p = turf.along(line, d, { units: 'meters' });
+      resampled.push(p.geometry.coordinates);
+    }
+    const endPt = turf.along(line, totalLength, { units: 'meters' });
+    resampled.push(endPt.geometry.coordinates);
+
+    for (let i = 0; i < resampled.length - 1; i++) {
+      outArray.push({
+        type: 'Feature',
+        properties: { flow: sourceFeature.properties.flow || 0 },
+        geometry: {
+          type: 'LineString',
+          coordinates: [resampled[i], resampled[i + 1]]
+        }
+      });
+    }
+  }
+
+  async function loadAwkwardCorners() {
+    const url = 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/users%2FAbE2j6m8F1aQ7e68C9dVBGPmhLS2%2Fstock_files%2FMucklton%20Farm%20awkward%20corners%20WGS1984.geojson?alt=media&token=0cdd33b5-fd1f-4c12-9388-b076e8b40a32';
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      map.getSource('awkward-data').setData(data);
+    } catch (e) {
+      console.error("Awkward Corners Error", e);
+    }
+  }
+
+  function toggleHedges(visible) {
+    toggleLayer('hedges-extrusion', visible);
+    toggleLayer('hedges-outline', visible);
+    if (visible && !hedgesLoaded) loadHedges();
+  }
+
+  async function loadHedges() {
+    const loader = document.getElementById('loadingIndicator');
+    loader.style.display = 'block';
+    loader.innerText = "Loading hedges...";
+
+    try {
+      const res = await fetch(HEDGES_URL);
+      if (!res.ok) throw new Error(`Hedges fetch failed (${res.status})`);
+      const data = await res.json();
+
+      const fc = (data && data.type === 'FeatureCollection')
+        ? data
+        : { type: 'FeatureCollection', features: (data.features || []) };
+
+      const buffered = {
+        type: 'FeatureCollection',
+        features: fc.features.map(f => {
+          const g = f.geometry && f.geometry.type;
+          if (g === 'LineString' || g === 'MultiLineString') {
+            const h = f.properties?.height;
+            const poly = turf.buffer(f, 0.002, { units: 'kilometers' });
+            poly.properties = { ...(f.properties || {}), height: h };
+            return poly;
+          }
+          return f;
+        })
+      };
+
+      map.getSource('hedges-data').setData(buffered);
+      hedgesLoaded = true;
+      loader.innerText = `Hedges loaded (${buffered.features.length}).`;
+    } catch (e) {
+      console.error("Hedges Error", e);
+      loader.innerText = "Hedges load error: " + e.message;
+    }
+  }
+
+  function reprojectGeoJSONFeature(feature) {
+    const f = JSON.parse(JSON.stringify(feature));
+    const transform = (coords) => proj4('EPSG:27700', 'EPSG:4326', coords);
+
+    const transformGeom = (g) => {
+      if (!g || !g.coordinates) return;
+      if (g.type === 'Polygon' || g.type === 'MultiLineString') g.coordinates = g.coordinates.map(r => r.map(transform));
+      else if (g.type === 'MultiPolygon') g.coordinates = g.coordinates.map(p => p.map(r => r.map(transform)));
+      else if (g.type === 'LineString') g.coordinates = g.coordinates.map(transform);
     };
 
-    // State
-    let currentSbiGeoJSON = null;
-    const NORWICH_CENTER = [1.29278, 52.62861];
+    transformGeom(f.geometry);
+    return turf.rewind(f, { reverse: false, mutate: true });
+  }
 
-    // 2. INITIALIZE MAP
-    const map = new mapboxgl.Map({
-        container: 'map',
-        style: 'mapbox://styles/mapbox/satellite-v9',
-        center: NORWICH_CENTER,
-        zoom: 13,
-        pitch: 60,
-        bearing: 0,
-        projection: 'globe'
-    });
-
-    // Add standard Navigation Control (Zoom + Compass)
-    map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
-    // Add Scale Control
-    map.addControl(new mapboxgl.ScaleControl(), 'bottom-left');
-
-    // 3. MAP LOAD EVENT
-    map.on('load', () => {
-        // A. Add 3D Terrain Source
-        map.addSource('mapbox-dem', {
-            'type': 'raster-dem',
-            'url': 'mapbox://mapbox.mapbox-terrain-dem-v1',
-            'tileSize': 512,
-            'maxzoom': 14
-        });
-
-        map.setTerrain({ 'source': 'mapbox-dem', 'exaggeration': 2.0 });
-
-        // A2. Add Sky Layer for better 3D atmosphere
-        map.addLayer({
-            'id': 'sky',
-            'type': 'sky',
-            'paint': {
-                'sky-type': 'atmosphere',
-                'sky-atmosphere-sun': [0.0, 0.0],
-                'sky-atmosphere-sun-intensity': 15
-            }
-        });
-
-        // B. Add Empty Sources for our Data Layers
-        map.addSource('sbi-data', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-        map.addSource('ofp-data', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-        map.addSource('awkward-data', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-
-        // NEW: Hedges source (initially empty; lazy-loaded)
-        map.addSource('hedges-data', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-
-        // C. Define Layers
-
-        // 1. SBI Land Cover (Fill)
-        map.addLayer({
-            'id': 'sbi-fill',
-            'type': 'fill',
-            'source': 'sbi-data',
-            'paint': {
-                'fill-color': ['get', 'color'],
-                'fill-opacity': 0.6
-            }
-        });
-
-        // 2. SBI Land Cover (Outline)
-        map.addLayer({
-            'id': 'sbi-line',
-            'type': 'line',
-            'source': 'sbi-data',
-            'paint': {
-                'line-color': '#000',
-                'line-width': 1
-            }
-        });
-
-        // 3. Flow Pathways (Arrows/Lines)
-        map.addLayer({
-            'id': 'ofp-arrows',
-            'type': 'line',
-            'source': 'ofp-data',
-            'layout': {
-                'line-join': 'round',
-                'line-cap': 'round'
-            },
-            'paint': {
-                'line-color': ['case', ['>=', ['get', 'flow'], 50000], '#FF0000', '#0000FF'],
-                'line-width': ['case', ['>=', ['get', 'flow'], 50000], 4, 2]
-            }
-        });
-
-        // 4. Awkward Corners
-        map.addLayer({
-            'id': 'awkward-fill',
-            'type': 'fill',
-            'source': 'awkward-data',
-            'paint': {
-                'fill-color': 'darkorange',
-                'fill-opacity': 0.4
-            }
-        });
-        map.addLayer({
-            'id': 'awkward-line',
-            'type': 'line',
-            'source': 'awkward-data',
-            'paint': {
-                'line-color': 'darkorange',
-                'line-width': 2,
-                'line-dasharray': [2, 2]
-            }
-        });
-
-        // NEW: Hedges (3D extruded vegetation)
-        map.addLayer({
-          id: 'hedges-extrusion',
-          type: 'fill-extrusion',
-          source: 'hedges-data',
-          layout: { visibility: 'visible' },
-          paint: {
-            'fill-extrusion-color': '#2e8b57',
-            'fill-extrusion-opacity': 0.75,
-            // Extrude by feature property "height" (fallback to 2m)
-            'fill-extrusion-height': [
-              'coalesce',
-              ['to-number', ['get', 'height']],
-              2
-            ],
-            'fill-extrusion-base': 0
-          }
-        });
-
-        // Optional outline for readability
-        map.addLayer({
-          id: 'hedges-outline',
-          type: 'line',
-          source: 'hedges-data',
-          layout: { visibility: 'visible' },
-          paint: {
-            'line-color': '#0b3d1f',
-            'line-width': 1
-          }
-        });
-
-        // Hedges popup
-        map.on('click', 'hedges-extrusion', (e) => {
-          const props = e.features?.[0]?.properties || {};
-          new mapboxgl.Popup()
-            .setLngLat(e.lngLat)
-            .setHTML(`<strong>Vegetation</strong><br>Height: ${props.height ?? 'N/A'} m`)
-            .addTo(map);
-        });
-
-        // Respect checkbox default (and lazy-load)
-        toggleHedges(document.getElementById('chkHedges').checked);
-
-        // Initial Data Load
-        runDataLoad();
-    });
-
-    // 4. DATA LOGIC
-
-    async function runDataLoad() {
-        const sbi = document.getElementById('sbiInput').value.trim();
-        const loader = document.getElementById('loadingIndicator');
-
-        if(!sbi) return alert("Please enter an SBI number.");
-
-        loader.style.display = 'block';
-        loader.innerText = "Fetching RPA Data...";
-
-        try {
-            // A. Fetch RPA Data
-            const url = `https://environment.data.gov.uk/data-services/RPA/LandCovers/wfs?version=2.0.0&request=GetFeature&typeNames=RPA:LandCovers&cql_filter=SBI=${sbi}&srsname=EPSG:27700&outputFormat=application/json`;
-            const response = await fetch(url);
-            if(!response.ok) throw new Error("RPA Service Error");
-            const data = await response.json();
-
-            if (!data.features || data.features.length === 0) {
-                loader.innerText = "No data found for this SBI.";
-                return;
-            }
-
-            // B. Process & Reproject RPA Data
-            const processedFeatures = data.features.map(f => {
-                const reprojected = reprojectGeoJSONFeature(f);
-                const desc = f.properties.DESCRIPTION || 'default';
-                reprojected.properties.color = landCoverColors[desc] || landCoverColors['default'];
-                reprojected.properties.description = desc;
-                return reprojected;
-            });
-
-            const sbiGeoJSON = { type: 'FeatureCollection', features: processedFeatures };
-            currentSbiGeoJSON = sbiGeoJSON;
-
-            map.getSource('sbi-data').setData(sbiGeoJSON);
-
-            // Fit Bounds
-            const bbox = turf.bbox(sbiGeoJSON);
-            map.fitBounds(bbox, { padding: 50, pitch: 60 });
-
-            // C. Load Flow Pathways
-            if(document.getElementById('chkOFP').checked) {
-                loadClusteredOFP(sbiGeoJSON);
-            }
-
-            // D. Load Awkward Corners
-            if(document.getElementById('chkAwkward').checked) {
-                loadAwkwardCorners();
-            }
-
-            loader.innerText = "Data Loaded.";
-
-        } catch (e) {
-            console.error(e);
-            loader.innerText = "Error: " + e.message;
-        }
+  function toggleLayer(layerId, visible) {
+    if (map.getLayer(layerId)) {
+      map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
     }
+  }
 
-    async function loadClusteredOFP(sbiGeoJSON) {
-        const loader = document.getElementById('loadingIndicator');
-        loader.innerText = "Loading Flow Pathways...";
+  // exact ant-path animation from Mapbox example, applied to 'ofp-line-dashed'[web:111][web:113]
+  function startAntPathAnimation() {
+    if (antAnimating || !dashArraySequence.length) return;
+    antAnimating = true;
+    antStep = 0;
 
-        try {
-            // DBSCAN Clustering for optimization
-            const centroids = turf.featureCollection(sbiGeoJSON.features.map(f => turf.centroid(f)));
-            const clustered = turf.clustersDbscan(centroids, 0.5, { units: 'kilometers', minPoints: 1 });
+    function animateDashArray(timestamp) {
+      if (!antAnimating) return;
 
-            const clusters = {};
-            clustered.features.forEach((c, i) => {
-                const cid = c.properties.cluster !== undefined ? c.properties.cluster : -1;
-                if(!clusters[cid]) clusters[cid] = [];
-                clusters[cid].push(sbiGeoJSON.features[i]);
-            });
+      const newStep = parseInt((timestamp / 50) % dashArraySequence.length, 10);
 
-            const ofpUrl = "https://services1.arcgis.com/JZM7qJpmv7vJ0Hzx/arcgis/rest/services/OverlandFlowPathwaysForPublicALERTEngland_20240318/FeatureServer/0";
-            const clusterIds = Object.keys(clusters);
-
-            const promises = clusterIds.map(id => {
-                const group = turf.featureCollection(clusters[id]);
-                const bbox = turf.bbox(group);
-                const query = `${ofpUrl}/query?f=geojson&geometry=${bbox.join(',')}&geometryType=esriGeometryEnvelope&spatialRel=esriSpatialRelIntersects&outFields=*&outSR=4326`;
-                return fetch(query).then(r => r.json()).then(d => d.features || []).catch(e => []);
-            });
-
-            const results = await Promise.all(promises);
-
-            const allFeatures = [];
-            const seen = new Set();
-            results.flat().forEach(f => {
-                const fid = f.properties.OBJECTID || f.id;
-                if(!seen.has(fid)) {
-                    seen.add(fid);
-                    allFeatures.push(f);
-                }
-            });
-
-            const filtered = allFeatures.filter(ofp => {
-                ofp.properties.flow = ofp.properties.MaxFlowAcc || 0;
-                return sbiGeoJSON.features.some(sbi => turf.booleanIntersects(ofp, sbi));
-            });
-
-            map.getSource('ofp-data').setData({ type: 'FeatureCollection', features: filtered });
-            loader.innerText = `Loaded ${filtered.length} Flow Paths.`;
-
-        } catch(e) {
-            console.error("OFP Error", e);
-            loader.innerText = "OFP Load Error";
-        }
-    }
-
-    async function loadAwkwardCorners() {
-        const url = 'https://firebasestorage.googleapis.com/v0/b/naturecitynorwich.firebasestorage.app/o/users%2FAbE2j6m8F1aQ7e68C9dVBGPmhLS2%2Fstock_files%2FMucklton%20Farm%20awkward%20corners%20WGS1984.geojson?alt=media&token=0cdd33b5-fd1f-4c12-9388-b076e8b40a32';
-        try {
-            const res = await fetch(url);
-            const data = await res.json();
-            map.getSource('awkward-data').setData(data);
-        } catch(e) {
-            console.error("Awkward Corners Error", e);
-        }
-    }
-
-    // NEW: Hedges toggle + loader
-    function toggleHedges(visible) {
-      toggleLayer('hedges-extrusion', visible);
-      toggleLayer('hedges-outline', visible);
-
-      if (visible && !hedgesLoaded) loadHedges();
-    }
-
-    async function loadHedges() {
-      const loader = document.getElementById('loadingIndicator');
-      loader.style.display = 'block';
-      loader.innerText = "Loading hedges...";
-
-      try {
-        const res = await fetch(HEDGES_URL);
-        if (!res.ok) throw new Error(`Hedges fetch failed (${res.status})`);
-        const data = await res.json();
-
-        const fc = (data && data.type === 'FeatureCollection')
-          ? data
-          : { type: 'FeatureCollection', features: (data.features || []) };
-
-        // If the hedges are lines, buffer them into thin polygons so fill-extrusion can render.
-        // Turf buffer units are kilometers; 0.002km = 2m.
-        const buffered = {
-          type: 'FeatureCollection',
-          features: fc.features.map(f => {
-            const g = f.geometry && f.geometry.type;
-            if (g === 'LineString' || g === 'MultiLineString') {
-              const h = f.properties?.height;
-              const poly = turf.buffer(f, 0.002, { units: 'kilometers' });
-              poly.properties = { ...(f.properties || {}), height: h };
-              return poly;
-            }
-            return f;
-          })
-        };
-
-        map.getSource('hedges-data').setData(buffered);
-        hedgesLoaded = true;
-        loader.innerText = `Hedges loaded (${buffered.features.length}).`;
-      } catch (e) {
-        console.error("Hedges Error", e);
-        loader.innerText = "Hedges load error: " + e.message;
+      if (newStep !== antStep) {
+        map.setPaintProperty(
+          'ofp-line-dashed',
+          'line-dasharray',
+          dashArraySequence[newStep]
+        );
+        antStep = newStep;
       }
+
+      requestAnimationFrame(animateDashArray);
     }
 
-    // 5. HELPER FUNCTIONS
+    requestAnimationFrame(animateDashArray);
+  }
 
-    // Coordinate Transform (BNG -> WGS84)
-    function reprojectGeoJSONFeature(feature) {
-        const f = JSON.parse(JSON.stringify(feature));
-        const transform = (coords) => proj4('EPSG:27700', 'EPSG:4326', coords);
+  document.getElementById('exaggeration').addEventListener('input', (e) => {
+    const val = parseFloat(e.target.value);
+    document.getElementById('exagValue').innerText = val.toFixed(1);
+    map.setTerrain({ source: 'mapbox-dem', exaggeration: val });
+  });
 
-        const transformGeom = (g) => {
-            if(g.type === 'Polygon' || g.type === 'MultiLineString') g.coordinates = g.coordinates.map(r => r.map(transform));
-            else if(g.type === 'MultiPolygon') g.coordinates = g.coordinates.map(p => p.map(r => r.map(transform)));
-            else if(g.type === 'LineString') g.coordinates = g.coordinates.map(transform);
-        };
+  map.on('click', 'sbi-fill', (e) => {
+    const props = e.features[0].properties;
+    new mapboxgl.Popup()
+      .setLngLat(e.lngLat)
+      .setHTML(`<strong>${props.description}</strong><br>Area: ${props.Hectares || '?'} ha`)
+      .addTo(map);
+  });
 
-        transformGeom(f.geometry);
-        return turf.rewind(f, {reverse: false, mutate: true});
-    }
-
-    function toggleLayer(layerId, visible) {
-        if(map.getLayer(layerId)) {
-            map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
-        }
-    }
-
-    // 6. UI INTERACTION
-
-    // Slider Logic
-    document.getElementById('exaggeration').addEventListener('input', (e) => {
-        const val = parseFloat(e.target.value);
-        document.getElementById('exagValue').innerText = val.toFixed(1);
-        map.setTerrain({ 'source': 'mapbox-dem', 'exaggeration': val });
+  function rotateCamera() {
+    map.easeTo({
+      bearing: map.getBearing() + 45,
+      duration: 1000,
+      easing: (t) => t
     });
+  }
 
-    // Popups
-    map.on('click', 'sbi-fill', (e) => {
-        const props = e.features[0].properties;
-        new mapboxgl.Popup()
-            .setLngLat(e.lngLat)
-            .setHTML(`<strong>${props.description}</strong><br>Area: ${props.Hectares || '?'} ha`)
-            .addTo(map);
+  function resetView() {
+    map.flyTo({
+      center: NORWICH_CENTER,
+      zoom: 13,
+      pitch: 0,
+      bearing: 0,
+      speed: 1.2
     });
-
-    // Custom Navigation Functions
-    function rotateCamera() {
-        map.easeTo({
-            bearing: map.getBearing() + 45,
-            duration: 1000,
-            easing: (t) => t
-        });
-    }
-
-    function resetView() {
-        map.flyTo({
-            center: NORWICH_CENTER,
-            zoom: 13,
-            pitch: 0,
-            bearing: 0,
-            speed: 1.2
-        });
-    }
+  }
 </script>
 </body>
 </html>
