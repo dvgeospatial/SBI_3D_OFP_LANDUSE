@@ -564,7 +564,7 @@
     function animateDashArray(timestamp) {
       if (!antAnimating) return;
 
-      const newStep = parseInt((timestamp / 50) % dashArraySequence.length, 10);
+      const newStep = parseInt((timestamp / 80) % dashArraySequence.length, 10);
 
       if (newStep !== antStep) {
         map.setPaintProperty(
@@ -615,4 +615,5 @@
 </script>
 </body>
 </html>
+
 
