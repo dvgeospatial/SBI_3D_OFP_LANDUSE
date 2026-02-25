@@ -98,7 +98,7 @@
         <button class="custom-nav-btn" onclick="rotateCamera()" title="Rotate Camera 45°">
             <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
         </button>
-        <button class="custom-nav-btn" onclick="resetView()" title="Pan to Home (Norwich)">
+        <button class="custom-nav-btn" onclick="resetView()" title="Zoom to SBI">
             <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
         </button>
     </div>
@@ -160,7 +160,6 @@
   };
 
   let currentSbiGeoJSON = null;
-  const NORWICH_CENTER = [1.29278, 52.62861];
 
   // ant path state
   let dashArraySequence = [];
@@ -170,9 +169,16 @@
   const map = new mapboxgl.Map({
     container: 'map',
     style: 'mapbox://styles/mapbox/satellite-v9',
-    center: NORWICH_CENTER,
-    zoom: 13,
-    pitch: 60,
+    // Initial view: full extent of Norfolk (CRS:84 bbox from NCC WMS)
+    // [min lon, min lat], [max lon, max lat]
+    bounds: [
+      [0.142383, 52.342450],  // southwest
+      [1.780533, 52.996885]   // northeast
+    ],
+    fitBoundsOptions: {
+      padding: 20
+    },
+    pitch: 0,
     bearing: 0,
     projection: 'globe'
   });
@@ -237,7 +243,7 @@
       }
     });
 
-    // OFP dashed line that will be animated, exactly like example's `line-dashed`[web:111]
+    // OFP dashed line that will be animated
     map.addLayer({
       id: 'ofp-line-dashed',
       type: 'line',
@@ -309,7 +315,7 @@
 
     toggleHedges(document.getElementById('chkHedges').checked);
 
-    // Prepare dash sequence from Mapbox example[web:111][web:113]
+    // Prepare dash sequence
     dashArraySequence = [
       [0, 4, 3],
       [0.5, 4, 2.5],
@@ -327,6 +333,7 @@
       [0, 3.5, 3, 0.5]
     ];
 
+    // Load default SBI and zoom to its bounds on startup
     runDataLoad();
   });
 
@@ -366,8 +373,12 @@
       const bbox = turf.bbox(sbiGeoJSON);
       map.fitBounds(bbox, { padding: 50, pitch: 60 });
 
+      // 100 m buffer (0.1 km) and dissolve
+      const buffered = turf.buffer(sbiGeoJSON, 0.1, { units: 'kilometers' });
+      const dissolvedBuffer = turf.dissolve(buffered);
+
       if (document.getElementById('chkOFP').checked) {
-        await loadClusteredOFP(sbiGeoJSON);
+        await loadClusteredOFP(sbiGeoJSON, dissolvedBuffer);
       }
 
       if (document.getElementById('chkAwkward').checked) {
@@ -381,7 +392,7 @@
     }
   }
 
-  async function loadClusteredOFP(sbiGeoJSON) {
+  async function loadClusteredOFP(sbiGeoJSON, sbiBuffer) {
     const loader = document.getElementById('loadingIndicator');
     loader.innerText = "Loading Flow Pathways...";
 
@@ -418,9 +429,10 @@
         }
       });
 
+      // Filter OFP lines by intersection with the 100m dissolved buffer
       const filtered = allFeatures.filter(ofp => {
         ofp.properties.flow = ofp.properties.MaxFlowAcc || 0;
-        return sbiGeoJSON.features.some(sbi => turf.booleanIntersects(ofp, sbi));
+        return turf.booleanIntersects(ofp, sbiBuffer);
       });
 
       map.getSource('ofp-data').setData({ type: 'FeatureCollection', features: filtered });
@@ -555,7 +567,6 @@
     }
   }
 
-  // exact ant-path animation from Mapbox example, applied to 'ofp-line-dashed'[web:111][web:113]
   function startAntPathAnimation() {
     if (antAnimating || !dashArraySequence.length) return;
     antAnimating = true;
@@ -603,19 +614,16 @@
     });
   }
 
+  // Home button: zoom back to current SBI bounds
   function resetView() {
-    map.flyTo({
-      center: NORWICH_CENTER,
-      zoom: 13,
-      pitch: 0,
-      bearing: 0,
-      speed: 1.2
+    if (!currentSbiGeoJSON || !currentSbiGeoJSON.features.length) return;
+    const bbox = turf.bbox(currentSbiGeoJSON);
+    map.fitBounds(bbox, {
+      padding: 50,
+      pitch: 60,
+      bearing: 0
     });
   }
 </script>
 </body>
 </html>
-
-
-
-
